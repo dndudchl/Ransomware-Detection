@@ -216,3 +216,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Ransomware research specific (NEVER commit these) ---
+# Malware samples
+*.exe
+*.dll
+*.bin
+
+# Raw CAPE analysis output (contains malicious data / env info)
+*_report.json
+report.json
+*.json.gz
+storage/
+analyses/
+
+# Memory dumps, dropped files
+*.dmp
+dropped/
+
+# Large / temporary artifacts
+*.7z
+*.etl

@@ -1,0 +1,8 @@
+file,label,total_imports,imp_crypto,imp_random,imp_file_ops,imp_volume_enum,imp_network_spread,imp_file_unlock,imp_process_enum,imp_shadow_service,imp_anti_analysis,indicative_category_count,static_crypto_libs
+7z.exe,benign,136,0,0,6,0,0,0,2,1,0,1,
+7zFM.exe,benign,291,0,0,6,1,0,0,5,1,1,2,
+7zG.exe,benign,211,0,0,6,1,0,0,2,1,1,2,
+Rar.exe,benign,180,3,1,8,1,0,0,2,1,2,3,
+UnRAR.exe,benign,165,0,0,8,1,0,0,2,1,2,2,
+vlc.exe,benign,166,3,1,5,0,0,0,0,1,2,1,
+WinRAR.exe,benign,502,0,0,9,1,0,0,0,1,2,1,

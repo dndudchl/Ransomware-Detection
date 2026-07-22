@@ -136,7 +136,44 @@ motivates treating static-only, dynamic-only, and static+dynamic samples
 as distinct but combinable evidence sources during modeling (see open
 question below).
 
-## Open question: asymmetric static/dynamic coverage in modeling
+### Large-scale validation with DikeDataset
+
+To address the small size of the initial "confusing tools" benign set
+(n=7), 962 additional benign PE samples were drawn from
+[DikeDataset](https://github.com/iosifache/DikeDataset) (iosifache,
+CC BY 4.0), a labeled benign/malicious PE dataset used in multiple
+published malware-detection studies. Unlike System32 (system utilities)
+or the hand-picked confusing tools (compression/encryption software),
+this set consists of a broad, unselected mix of real-world applications,
+providing an independent check on whether the static import signal holds
+up outside the two narrow benign sources used initially.
+
+Combined benign set (System32 + confusing tools + DikeDataset, n=1621):
+
+| Group | 0/5 | 1/5 | 2/5 | 3/5 | 4/5 | 5/5 |
+|---|---|---|---|---|---|---|
+| Ransomware (n=324) | 26.9% | 9.0% | 5.2% | 10.8% | **33.6%** | **14.5%** |
+| All benign combined (n=1621) | 76.7% | 17.3% | 4.3% | 1.5% | **0.1%** | **0.0%** |
+
+At the `indicative_category_count >= 4` threshold, roughly **48% of
+ransomware samples are flagged while the combined benign false-positive
+rate is 0.1%** (2 out of 1621). This result held even after nearly
+tripling the benign set with an independently-sourced, unselected
+application mix, which is evidence the separation is not an artifact of
+a narrow or hand-picked benign sample.
+
+**False-positive case study**: the two benign samples reaching 4/5 were
+inspected individually. One, `OneDriveSetup.exe`, imports crypto (9,
+statically-linked OpenSSL detected), volume_enum (3), file_unlock (4,
+Restart Manager), and process_enum (5) — a plausible and explainable
+false positive, since a file-sync client legitimately needs to unlock
+in-use files, enumerate volumes, and use TLS for cloud communication.
+This confirms a predicted risk (sync/backup software resembling
+ransomware's API footprint) while also showing it is rare in practice
+(2/1621 ≈ 0.12%). The second sample (`setupugc.exe`) scored more weakly
+across categories and did not present an obvious explanation.
+
+
 
 Not all samples have both static and dynamic features:
 - Static only: samples with unreadable/unexecuted payloads (majority of

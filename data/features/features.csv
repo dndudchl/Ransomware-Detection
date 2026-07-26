@@ -1,0 +1,3 @@
+sample_id,label,n_file_writes,n_crypto_calls,write_crypto_pearson,n_read,n_write,n_delete,n_move,n_copy,n_execute,delete_to_write_ratio,move_to_write_ratio,active_windows,destructive_chain_windows,write_only_nondestructive_windows
+37,ransomware,1919,874,0.6838974110993606,1063,1919,4132,1318,59,15,2.153204794163627,0.6868160500260553,213,77,24
+52,benign,137,0,,84,137,0,0,0,0,0.0,0.0,12,0,12

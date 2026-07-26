@@ -240,29 +240,51 @@ def extract_crypto_calls(report):
     return events
 
 
-def windowize(lifecycle_events, crypto_events, window_sec):
-    """Bucket events into fixed windows. Returns (lifecycle_windows, write_series, crypto_series)."""
-    all_ts = [e[0] for e in lifecycle_events] + [c[0] for c in crypto_events]
+def windowize_crypto(lifecycle_events, crypto_events, window_sec):
+    """
+    Bucket WRITE events and crypto calls into fixed windows, using a timeline
+    defined by writes and crypto calls only.
+
+    This deliberately uses a different time origin from the lifecycle
+    windowing below. The write<->crypto correlation is a statement about
+    those two series specifically, so its windows are anchored to the first
+    write-or-crypto event. Anchoring it to the first file event of any kind
+    (including reads that may precede any write) would shift every bucket
+    boundary and change the correlation value.
+    """
+    writes = [(ts, et) for ts, et, _ext, _p in lifecycle_events if et == "write"]
+    all_ts = [ts for ts, _et in writes] + [c[0] for c in crypto_events]
     if not all_ts:
-        return [], [], []
+        return [], []
     t0, t_end = min(all_ts), max(all_ts)
     n_buckets = int((t_end - t0).total_seconds() // window_sec) + 1
 
-    lifecycle_windows = [{t: 0 for t in FILE_EVENT_TYPES} for _ in range(n_buckets)]
     write_series = [0] * n_buckets
     crypto_series = [0] * n_buckets
 
-    for ts, event_type, _ext, _path in lifecycle_events:
-        idx = int((ts - t0).total_seconds() // window_sec)
-        lifecycle_windows[idx][event_type] += 1
-        if event_type == "write":
-            write_series[idx] += 1
-
+    for ts, _et in writes:
+        write_series[int((ts - t0).total_seconds() // window_sec)] += 1
     for ts, _length, _entropy, _api in crypto_events:
-        idx = int((ts - t0).total_seconds() // window_sec)
-        crypto_series[idx] += 1
+        crypto_series[int((ts - t0).total_seconds() // window_sec)] += 1
 
-    return lifecycle_windows, write_series, crypto_series
+    return write_series, crypto_series
+
+
+def windowize_lifecycle(lifecycle_events, window_sec):
+    """
+    Bucket all file lifecycle events into fixed windows, anchored to the
+    first file event. Used for the chain metrics below.
+    """
+    if not lifecycle_events:
+        return []
+    all_ts = [e[0] for e in lifecycle_events]
+    t0, t_end = min(all_ts), max(all_ts)
+    n_buckets = int((t_end - t0).total_seconds() // window_sec) + 1
+
+    windows = [{t: 0 for t in FILE_EVENT_TYPES} for _ in range(n_buckets)]
+    for ts, event_type, _ext, _path in lifecycle_events:
+        windows[int((ts - t0).total_seconds() // window_sec)][event_type] += 1
+    return windows
 
 
 def compute_chain_metrics(lifecycle_windows):
@@ -308,8 +330,9 @@ def extract_dynamic_features(report, window_sec):
     delete_ratio = counts["delete"] / writes if writes else ""
     move_ratio = counts["move"] / writes if writes else ""
 
-    lifecycle_windows, write_series, crypto_series = windowize(
+    write_series, crypto_series = windowize_crypto(
         lifecycle_events, crypto_events, window_sec)
+    lifecycle_windows = windowize_lifecycle(lifecycle_events, window_sec)
     chain = compute_chain_metrics(lifecycle_windows)
     corr = pearson(write_series, crypto_series)
 
@@ -325,6 +348,7 @@ def extract_dynamic_features(report, window_sec):
                         if et in DESTRUCTIVE_EVENT_TYPES}
 
     return {
+        "n_file_writes": counts["write"],
         "n_crypto_calls": len(crypto_events),
         "write_crypto_pearson": corr if corr is not None else "",
         "crypto_buffer_entropy_mean": entropy_mean,
@@ -344,20 +368,93 @@ def extract_dynamic_features(report, window_sec):
 
 # ---------------- Static extraction ----------------
 
-def get_imports(report):
+def _flatten_import_container(container):
+    """
+    Both report formats end in the same per-DLL shape
+    ({"dll": ..., "imports": [{"name": ...}]}), but wrap it differently:
+      - CAPE:           a dict keyed by short DLL name
+      - legacy Cuckoo:  a list of those per-DLL entries
+    """
+    entries = []
+    if isinstance(container, dict):
+        entries = list(container.values())
+    elif isinstance(container, list):
+        entries = container
+
     names = []
-    static = report.get("static", {}) or {}
-    for dll_entry in static.get("pe_imports", []) or []:
-        for imp in dll_entry.get("imports", []) or []:
-            name = imp.get("name")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        for imp in entry.get("imports", []) or []:
+            name = imp.get("name") if isinstance(imp, dict) else None
             if name:
                 names.append(name)
     return names
 
 
+def get_imports(report):
+    """
+    Imports declared by the SUBMITTED file.
+
+    CAPE stores these under target.file.pe.imports; the older Cuckoo reports
+    used static.pe_imports. We read whichever is present so the same feature
+    definition applies to both datasets, and so these stay comparable with
+    the benign control set, which is extracted from raw executables with
+    pefile (also the file's own import table).
+    """
+    cape_imports = (report.get("target", {}) or {}).get("file", {}).get("pe", {}).get("imports")
+    if cape_imports:
+        return _flatten_import_container(cape_imports)
+
+    legacy_imports = (report.get("static", {}) or {}).get("pe_imports")
+    if legacy_imports:
+        return _flatten_import_container(legacy_imports)
+
+    return []
+
+
+def get_unpacked_imports(report):
+    """
+    Imports visible only AFTER the sample unpacked itself.
+
+    A packed dropper's own import table understates what the malware can do:
+    WannaCry's submitted file declares only CryptReleaseContext, while the
+    payload CAPE extracted at runtime also imports CryptGenRandom. CAPE
+    surfaces these through CAPE.payloads and dropped files, which pure
+    static analysis of the original binary cannot see.
+
+    Returned separately from get_imports() rather than merged into it,
+    because the benign control set has no equivalent (benign programs are
+    not unpacked at runtime), so mixing them would break comparability.
+    """
+    names = []
+    payloads = (report.get("CAPE", {}) or {}).get("payloads", []) or []
+    for payload in payloads:
+        if isinstance(payload, dict):
+            names.extend(_flatten_import_container(
+                payload.get("pe", {}).get("imports")))
+    for dropped in report.get("dropped", []) or []:
+        if isinstance(dropped, dict):
+            names.extend(_flatten_import_container(
+                dropped.get("pe", {}).get("imports")))
+    return names
+
+
 def get_strings(report):
-    s = report.get("strings", [])
-    return [x for x in s if isinstance(x, str)] if isinstance(s, list) else []
+    """
+    Extracted strings, used for crypto-library fingerprinting.
+    CAPE nests them under target.file.strings; legacy Cuckoo put them at the
+    top level.
+    """
+    cape_strings = (report.get("target", {}) or {}).get("file", {}).get("strings")
+    if isinstance(cape_strings, list) and cape_strings:
+        return [x for x in cape_strings if isinstance(x, str)]
+
+    legacy_strings = report.get("strings")
+    if isinstance(legacy_strings, list):
+        return [x for x in legacy_strings if isinstance(x, str)]
+
+    return []
 
 
 def categorize_imports(import_names):
@@ -390,6 +487,24 @@ def extract_static_features(report):
         features[f"imp_{category}"] = category_hits.get(category, 0)
     features["indicative_category_count"] = len(indicative)
     features["static_crypto_libs"] = ";".join(sorted(crypto_libs)) if crypto_libs else ""
+
+    # Unpacked view: what became visible only after the sample ran and
+    # unpacked itself. Reported separately (see get_unpacked_imports).
+    unpacked_names = get_unpacked_imports(report)
+    if unpacked_names:
+        unpacked_hits = categorize_imports(unpacked_names)
+        unpacked_indicative = [c for c in INDICATIVE_CATEGORIES
+                               if unpacked_hits.get(c, 0) > 0]
+        features["unpacked_total_imports"] = len(unpacked_names)
+        features["unpacked_indicative_category_count"] = len(unpacked_indicative)
+        # Categories the packed original hid from static analysis.
+        features["categories_revealed_by_unpacking"] = max(
+            0, len(unpacked_indicative) - len(indicative))
+    else:
+        features["unpacked_total_imports"] = 0
+        features["unpacked_indicative_category_count"] = ""
+        features["categories_revealed_by_unpacking"] = ""
+
     return features
 
 
@@ -433,7 +548,7 @@ def compute_interaction_features(static_features, dynamic_features):
 IDENTITY_FIELDS = ["sample_id", "sha256", "label", "family", "source",
                     "malscore", "cape_family"]
 DYNAMIC_FIELDS = [
-    "n_crypto_calls", "write_crypto_pearson",
+    "n_file_writes", "n_crypto_calls", "write_crypto_pearson",
     "crypto_buffer_entropy_mean", "crypto_buffer_entropy_max",
     "n_read", "n_write", "n_delete", "n_move", "n_copy", "n_execute",
     "delete_to_write_ratio", "move_to_write_ratio",
@@ -442,7 +557,9 @@ DYNAMIC_FIELDS = [
     "write_only_nondestructive_windows", "other_windows",
 ]
 STATIC_FIELDS = (["total_imports"] + [f"imp_{c}" for c in IMPORT_CATEGORIES] +
-                  ["indicative_category_count", "static_crypto_libs"])
+                  ["indicative_category_count", "static_crypto_libs",
+                   "unpacked_total_imports", "unpacked_indicative_category_count",
+                   "categories_revealed_by_unpacking"])
 INTERACTION_FIELDS = ["crypto_imported_not_called", "crypto_called_not_imported",
                        "static_dynamic_agreement"]
 
@@ -523,7 +640,8 @@ def resolve_report_path(path):
     return p if p.is_file() else None
 
 
-def process_one(path, label, source, window_sec, features_out, manifest_by_sha, quiet=False):
+def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
+                 quiet=False, sample_id_override=None):
     report_path = resolve_report_path(path)
     if not report_path:
         if not quiet:
@@ -539,7 +657,7 @@ def process_one(path, label, source, window_sec, features_out, manifest_by_sha, 
         return None
 
     info = report.get("info", {}) or {}
-    sample_id = str(info.get("id", Path(report_path).parent.parent.name))
+    sample_id = sample_id_override or str(info.get("id", Path(report_path).parent.parent.name))
     sha256 = (report.get("target", {}) or {}).get("file", {}).get("sha256", "")
 
     # Enrich with family from the manifest when available.
@@ -577,6 +695,8 @@ def main():
                          help="Manifest CSV, used to enrich rows with family metadata")
     parser.add_argument("--window", type=float, default=1.0,
                          help="Time window in seconds for correlation features (default: 1.0)")
+    parser.add_argument("--sample-id", default=None,
+                         help="Override the sample id (defaults to the CAPE task id)")
     args = parser.parse_args()
 
     manifest_by_sha = load_manifest_by_sha(args.manifest)
@@ -619,7 +739,8 @@ def main():
 
     elif args.path:
         row = process_one(args.path, args.label, args.source, args.window,
-                          args.features_out, manifest_by_sha)
+                          args.features_out, manifest_by_sha,
+                          sample_id_override=args.sample_id)
         if row and args.features_out:
             print(f"[saved] feature row -> {args.features_out}")
     else:

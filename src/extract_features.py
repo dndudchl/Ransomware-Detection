@@ -105,6 +105,16 @@ CRYPTO_LIB_FINGERPRINTS = {
 INDICATIVE_CATEGORIES = ("crypto", "volume_enum", "network_spread",
                           "file_unlock", "process_enum")
 
+# Below this many imports, the import table is effectively unreadable: the
+# binary is packed or obfuscated and its declared imports say nothing about
+# what it can do. Such rows still get written (so the dataset honestly
+# records how many samples were unanalysable) but they are flagged, because
+# their all-zero static features are an absence of evidence, not evidence of
+# absence -- and our benign control set contains no packed programs, so a
+# model would otherwise learn "no imports = ransomware" from a dataset
+# artefact rather than from behaviour.
+MIN_READABLE_IMPORTS = 20
+
 
 # ---------------- Shared helpers ----------------
 
@@ -546,7 +556,7 @@ def compute_interaction_features(static_features, dynamic_features):
 # ---------------- Feature row assembly ----------------
 
 IDENTITY_FIELDS = ["sample_id", "sha256", "label", "family", "source",
-                    "malscore", "cape_family"]
+                    "coverage", "static_readable", "malscore", "cape_family"]
 DYNAMIC_FIELDS = [
     "n_file_writes", "n_crypto_calls", "write_crypto_pearson",
     "crypto_buffer_entropy_mean", "crypto_buffer_entropy_max",
@@ -587,12 +597,19 @@ def get_cape_metadata(report):
     }
 
 
-def build_feature_row(report, sample_id, label, family, source, window_sec):
-    dynamic = extract_dynamic_features(report, window_sec)
-    static = extract_static_features(report)
-    interaction = compute_interaction_features(static, dynamic)
-    cape_meta = get_cape_metadata(report)
+def build_feature_row(report, sample_id, label, family, source, window_sec,
+                       dynamic_ok=True):
+    """
+    Assemble one feature row.
 
+    dynamic_ok=False produces a static-only row: the dynamic and interaction
+    columns are left blank rather than filled with zeros. This distinction
+    matters. A sample that never executed has no delete count -- writing 0
+    would tell the model "this ransomware deletes nothing", which is false.
+    Blank means "not observed"; 0 means "observed to be zero".
+    """
+    static = extract_static_features(report)
+    cape_meta = get_cape_metadata(report)
     sha256 = (report.get("target", {}) or {}).get("file", {}).get("sha256", "")
 
     row = {
@@ -601,12 +618,55 @@ def build_feature_row(report, sample_id, label, family, source, window_sec):
         "label": label,
         "family": family or "",
         "source": source,
+        "coverage": "full" if dynamic_ok else "static_only",
+        "static_readable": int(static.get("total_imports", 0) >= MIN_READABLE_IMPORTS),
     }
     row.update(cape_meta)
-    row.update(dynamic)
+
+    if dynamic_ok:
+        dynamic = extract_dynamic_features(report, window_sec)
+        row.update(dynamic)
+        row.update(compute_interaction_features(static, dynamic))
+    else:
+        for field in DYNAMIC_FIELDS + INTERACTION_FIELDS:
+            row[field] = ""
+
     row.update(static)
-    row.update(interaction)
     return row
+
+
+def load_existing_features(features_out):
+    """
+    Read back what is already in the feature table so re-running the
+    pipeline does not append the same analysis twice.
+
+    Returns (sample_ids, sha256_to_sample_id).
+
+    Two kinds of duplication matter and they are not the same thing:
+      - Same sample_id: the same CAPE analysis processed twice. Always a
+        mistake; skipped silently.
+      - Same sha256 under a different sample_id: the same binary analysed
+        more than once (e.g. re-submitted with a longer timeout). That may
+        be deliberate, but leaving both rows in risks the same sample
+        landing in both the training and test split later, so it is
+        flagged rather than silently accepted.
+    """
+    if not features_out or not os.path.exists(features_out):
+        return set(), {}
+    sample_ids = set()
+    sha_to_id = {}
+    try:
+        with open(features_out, newline="") as f:
+            for row in csv.DictReader(f):
+                sid = str(row.get("sample_id", "")).strip()
+                sha = str(row.get("sha256", "")).strip()
+                if sid:
+                    sample_ids.add(sid)
+                if sha:
+                    sha_to_id.setdefault(sha, sid)
+    except OSError:
+        return set(), {}
+    return sample_ids, sha_to_id
 
 
 def append_feature_row(features_out, row):
@@ -616,6 +676,26 @@ def append_feature_row(features_out, row):
         if not file_exists:
             writer.writeheader()
         writer.writerow({k: row.get(k, "") for k in FEATURE_FIELDNAMES})
+
+
+def rewrite_feature_row(features_out, row):
+    """Replace an existing row with the same sample_id (used by --overwrite)."""
+    rows = []
+    with open(features_out, newline="") as f:
+        rows = list(csv.DictReader(f))
+    replaced = False
+    for i, existing in enumerate(rows):
+        if str(existing.get("sample_id", "")).strip() == str(row["sample_id"]):
+            rows[i] = {k: row.get(k, "") for k in FEATURE_FIELDNAMES}
+            replaced = True
+            break
+    if not replaced:
+        rows.append({k: row.get(k, "") for k in FEATURE_FIELDNAMES})
+    with open(features_out, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=FEATURE_FIELDNAMES)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({k: r.get(k, "") for k in FEATURE_FIELDNAMES})
 
 
 # ---------------- Manifest lookup (for family metadata) ----------------
@@ -641,7 +721,9 @@ def resolve_report_path(path):
 
 
 def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
-                 quiet=False, sample_id_override=None):
+                 quiet=False, sample_id_override=None,
+                 existing_ids=None, existing_shas=None, overwrite=False,
+                 dynamic_ok=True):
     report_path = resolve_report_path(path)
     if not report_path:
         if not quiet:
@@ -665,16 +747,45 @@ def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
     if sha256 and sha256 in manifest_by_sha:
         family = manifest_by_sha[sha256].get("family", "")
 
-    row = build_feature_row(report, sample_id, label, family, source, window_sec)
+    # Skip analyses already present, so the pipeline can be re-run safely.
+    if existing_ids is not None and sample_id in existing_ids and not overwrite:
+        if not quiet:
+            print(f"{sample_id:<8} (already in feature table -- skipped; "
+                  f"use --overwrite to replace)")
+        return None
+
+    row = build_feature_row(report, sample_id, label, family, source, window_sec,
+                            dynamic_ok=dynamic_ok)
+
+    # Same binary, different analysis: allowed, but flagged because leaving
+    # both rows in can put the same sample in both train and test splits.
+    if existing_shas and sha256 and sha256 in existing_shas:
+        prior = existing_shas[sha256]
+        if prior != sample_id and not quiet:
+            print(f"   [warn] sha256 of task {sample_id} already present as task "
+                  f"{prior}; same binary analysed twice -- deduplicate before modelling")
 
     if features_out:
-        append_feature_row(features_out, row)
+        if overwrite and existing_ids is not None and sample_id in existing_ids:
+            rewrite_feature_row(features_out, row)
+        else:
+            append_feature_row(features_out, row)
+        if existing_ids is not None:
+            existing_ids.add(sample_id)
+        if existing_shas is not None and sha256:
+            existing_shas.setdefault(sha256, sample_id)
 
     if not quiet:
-        print(f"{sample_id:<8} {family[:14]:<15} "
-              f"read={row['n_read']:<5} write={row['n_write']:<5} "
-              f"del={row['n_delete']:<5} crypto={row['n_crypto_calls']:<5} "
-              f"imports={row['total_imports']:<5} ind={row['indicative_category_count']}/5")
+        readable = "" if row["static_readable"] else "  [packed: static unusable]"
+        if dynamic_ok:
+            print(f"{sample_id:<8} {family[:12]:<13} full        "
+                  f"read={row['n_read']:<5} write={row['n_write']:<5} "
+                  f"del={row['n_delete']:<5} crypto={row['n_crypto_calls']:<5} "
+                  f"imports={row['total_imports']:<5} ind={row['indicative_category_count']}/5{readable}")
+        else:
+            print(f"{sample_id:<8} {family[:12]:<13} static_only "
+                  f"{'(no dynamic data)':<40} "
+                  f"imports={row['total_imports']:<5} ind={row['indicative_category_count']}/5{readable}")
     return row
 
 
@@ -697,9 +808,21 @@ def main():
                          help="Time window in seconds for correlation features (default: 1.0)")
     parser.add_argument("--sample-id", default=None,
                          help="Override the sample id (defaults to the CAPE task id)")
+    parser.add_argument("--static-for-all", action="store_true",
+                         help="Also emit static-only rows for analyses that did not reach "
+                              "--keep-verdict. Their static features are still valid (the "
+                              "import table does not depend on execution), so discarding "
+                              "them wastes most of the dataset.")
+    parser.add_argument("--overwrite", action="store_true",
+                         help="Recompute and replace rows already in the feature table "
+                              "(default: skip them, so re-runs are safe)")
     args = parser.parse_args()
 
     manifest_by_sha = load_manifest_by_sha(args.manifest)
+    existing_ids, existing_shas = load_existing_features(args.features_out)
+    if existing_ids:
+        print(f"Feature table already contains {len(existing_ids)} samples; "
+              f"{'recomputing' if args.overwrite else 'these will be skipped'}\n")
 
     if args.batch:
         base = Path(args.batch)
@@ -707,40 +830,57 @@ def main():
             print(f"[!] not a directory: {args.batch}")
             sys.exit(1)
 
-        # Restrict to analyses that passed, if a results CSV was given.
-        allowed_ids = None
+        # Map each analysis to its verdict so we can decide, per sample,
+        # whether dynamic features are meaningful.
+        verdict_by_id = {}
         if args.results:
-            allowed_ids = set()
             with open(args.results, newline="") as f:
                 for r in csv.DictReader(f):
-                    if r.get("verdict") == args.keep_verdict:
-                        allowed_ids.add(str(r.get("task_id", "")).strip())
-            print(f"Restricting to {len(allowed_ids)} analyses with verdict "
-                  f"{args.keep_verdict}\n")
+                    verdict_by_id[str(r.get("task_id", "")).strip()] = r.get("verdict", "")
+            n_pass = sum(1 for v in verdict_by_id.values() if v == args.keep_verdict)
+            if args.static_for_all:
+                print(f"{n_pass} analyses reached {args.keep_verdict} (full features); "
+                      f"{len(verdict_by_id) - n_pass} others get static-only rows\n")
+            else:
+                print(f"Restricting to {n_pass} analyses with verdict "
+                      f"{args.keep_verdict}\n")
 
         subdirs = sorted((d for d in base.iterdir() if d.is_dir()),
                           key=lambda d: int(d.name) if d.name.isdigit() else 0)
-        if allowed_ids is not None:
-            subdirs = [d for d in subdirs if d.name in allowed_ids]
 
-        header = (f"{'task':<8} {'family':<15} {'dynamic':<40} {'static'}")
-        print(header)
-        print("-" * 90)
+        print(f"{'task':<8} {'family':<13} {'coverage':<11} {'features'}")
+        print("-" * 100)
 
-        processed = 0
+        n_full = n_static = 0
         for d in subdirs:
-            if process_one(d, args.label, args.source, args.window,
-                           args.features_out, manifest_by_sha):
-                processed += 1
+            verdict = verdict_by_id.get(d.name) if verdict_by_id else args.keep_verdict
+            if verdict == args.keep_verdict:
+                dynamic_ok = True
+            elif args.static_for_all:
+                dynamic_ok = False
+            else:
+                continue
 
-        print(f"\n[done] extracted features from {processed} analyses")
+            if process_one(d, args.label, args.source, args.window,
+                           args.features_out, manifest_by_sha,
+                           existing_ids=existing_ids, existing_shas=existing_shas,
+                           overwrite=args.overwrite, dynamic_ok=dynamic_ok):
+                if dynamic_ok:
+                    n_full += 1
+                else:
+                    n_static += 1
+
+        processed = n_full + n_static
+        print(f"\n[done] {processed} rows written: {n_full} full, {n_static} static-only")
         if args.features_out:
             print(f"[saved] {args.features_out}")
 
     elif args.path:
         row = process_one(args.path, args.label, args.source, args.window,
                           args.features_out, manifest_by_sha,
-                          sample_id_override=args.sample_id)
+                          sample_id_override=args.sample_id,
+                          existing_ids=existing_ids, existing_shas=existing_shas,
+                          overwrite=args.overwrite)
         if row and args.features_out:
             print(f"[saved] feature row -> {args.features_out}")
     else:

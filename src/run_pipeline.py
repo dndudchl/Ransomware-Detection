@@ -111,9 +111,12 @@ def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
         evasion / self-installation behaviour, which is itself a finding.
         Deleting them without a backup would be irreversible data loss.
 
-      - Never really executed (FAILED): deleted outright without archiving.
-        There is no behavioural data to preserve, and the verdict is already
-        recorded in the manifest and the results CSV.
+      - Never really executed (FAILED): archived as well. This changed once
+        static features were harvested from non-qualifying analyses: a FAILED
+        analysis still carries a readable import table, so if the static
+        feature definitions change later, its report must still exist to
+        re-extract from. Compressed reports are cheap (roughly 100MB -> 10-20MB),
+        so the safe default is to keep everything.
     """
     analyses_path = Path(analyses_dir)
     archive_path = Path(archive_dir).expanduser()
@@ -155,8 +158,8 @@ def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
             skipped += 1
             continue
         elif verdict == "FAILED":
-            reason = "did not execute"
-            should_archive = False
+            reason = "did not execute (static features may still apply)"
+            should_archive = True
         else:
             # WEAK_VICTIM_ACTIVITY / NO_VICTIM_ACTIVITY: worth preserving.
             reason = f"{verdict} (kept for review)"
@@ -195,7 +198,10 @@ def main():
     parser.add_argument("--results-out", default="analysis_results.csv",
                          help="Where to write the verdict CSV (default: analysis_results.csv)")
     parser.add_argument("--keep-verdict", default="TRUE_ENCRYPTION",
-                         help="Verdict that proceeds to feature extraction")
+                         help="Verdict that gets FULL (dynamic + static) features")
+    parser.add_argument("--static-for-all", action="store_true",
+                         help="Also emit static-only rows for analyses that did not reach "
+                              "--keep-verdict, instead of discarding them")
     parser.add_argument("--label", default="ransomware", help="Label for extracted rows")
     parser.add_argument("--window", type=float, default=1.0,
                          help="Correlation window in seconds (default: 1.0)")
@@ -236,8 +242,10 @@ def main():
     passed = read_verdicts(args.results_out, args.keep_verdict)
     print(f"\n[pipeline] {len(passed)} analyses reached {args.keep_verdict}")
 
-    if not passed:
+    if not passed and not args.static_for_all:
         print("[pipeline] nothing to extract; stopping here.")
+        print("           (pass --static-for-all to still harvest static features "
+              "from analyses that did not qualify)")
         if args.dry_run and os.path.exists(args.results_out):
             os.remove(args.results_out)
         return
@@ -255,6 +263,8 @@ def main():
            "--features-out", args.features_out,
            "--label", args.label,
            "--window", str(args.window)]
+    if args.static_for_all:
+        cmd.append("--static-for-all")
     if args.manifest:
         cmd += ["--manifest", args.manifest]
 

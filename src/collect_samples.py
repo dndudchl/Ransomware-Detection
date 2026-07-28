@@ -438,11 +438,13 @@ def main():
                          help=f"Directory CAPE can read samples from (default: {DEFAULT_STAGING_DIR})")
     parser.add_argument("--cape-timeout", type=int, default=300,
                          help="Analysis timeout in seconds passed to CAPE (default: 300)")
-    parser.add_argument("--route", default=None,
-                         help="CAPE network route for the guest: none, inetsim, internet. "
-                              "Left unset, CAPE's configured default applies. Samples that "
-                              "wait on a C2 server before encrypting will not trigger "
-                              "without network access.")
+    parser.add_argument("--route", default="internet",
+                         help="CAPE network route for the guest: none, inetsim, internet "
+                              "(default: internet). Ransomware that waits on a C2 server "
+                              "before encrypting will not trigger without network access, "
+                              "which is why this defaults on -- but it does mean live "
+                              "malware reaches the network, so use --route none or "
+                              "--route inetsim when that is not acceptable.")
     parser.add_argument("--enforce-timeout", action="store_true",
                          help="Keep each analysis running for the full timeout even after "
                               "the sample exits. Catches payloads that start late, but since "

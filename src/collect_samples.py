@@ -71,6 +71,7 @@ import argparse
 import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
+from collections import defaultdict
 
 API_URL = "https://mb-api.abuse.ch/api/v1/"
 ZIP_PASSWORD = b"infected"
@@ -300,6 +301,106 @@ def submit_to_cape(sample_path, sha256, cape_dir, poetry_bin, staging_dir,
     return None
 
 
+def select_pending(manifest, count, order):
+    """
+    Choose which already-downloaded samples to submit next.
+
+    Default order is round-robin across families rather than oldest-first.
+    With an unbalanced download (say 1000 Cuba and 200 Babuk), oldest-first
+    would send a whole batch of a single family, and family diversity is
+    something this project needs in the results rather than in the archive.
+    """
+    pending = [row for row in manifest.values() if row.get("status") == "pending"]
+    pending.sort(key=lambda r: r.get("added_date", ""))
+
+    if order == "added":
+        return pending[:count]
+
+    by_family = defaultdict(list)
+    for row in pending:
+        by_family[row.get("family") or "(unknown)"].append(row)
+
+    selected = []
+    families = sorted(by_family)
+    while len(selected) < count and any(by_family[f] for f in families):
+        for family in families:
+            if by_family[family] and len(selected) < count:
+                selected.append(by_family[family].pop(0))
+    return selected
+
+
+def run_submit_pending(args):
+    """Submit samples already downloaded and recorded as pending."""
+    manifest = load_manifest(args.manifest)
+    if not manifest:
+        print(f"[!] manifest is empty or missing: {args.manifest}")
+        sys.exit(1)
+
+    samples_dir = Path(args.samples_dir)
+    selected = select_pending(manifest, args.submit_pending, args.order)
+
+    total_pending = sum(1 for r in manifest.values() if r.get("status") == "pending")
+    print(f"Manifest: {args.manifest} ({total_pending} pending)")
+    print(f"Submitting: {len(selected)} (order: {args.order})")
+    print(f"Settings: timeout={args.cape_timeout}"
+          f"{' route=' + args.route if args.route else ''}"
+          f"{' machine=' + args.machine if args.machine else ''}"
+          f"{' enforce-timeout' if args.enforce_timeout else ''}")
+    if args.dry_run:
+        print("DRY RUN -- nothing will be submitted")
+    print()
+
+    by_family = defaultdict(int)
+    for row in selected:
+        by_family[row.get("family") or "(unknown)"] += 1
+    print("   batch composition: " +
+          ", ".join(f"{f}={n}" for f, n in sorted(by_family.items())) + "\n")
+
+    submitted = failed = missing = 0
+    for row in selected:
+        sha = row["sha256"]
+        sample_path = samples_dir / sha
+        if not sample_path.exists():
+            print(f"   [!] {sha[:16]}... file not found in {samples_dir}")
+            missing += 1
+            continue
+
+        print(f"   - {sha[:16]}... {row.get('family', ''):<14} "
+              f"{row.get('original_filename', '')[:30]}")
+
+        task_id = submit_to_cape(
+            sample_path, sha, args.cape_dir, args.poetry_bin, args.staging_dir,
+            args.cape_timeout, args.machine, route=args.route,
+            enforce_timeout=args.enforce_timeout, package=args.package,
+            dry_run=args.dry_run)
+
+        if args.dry_run:
+            continue
+
+        if task_id:
+            manifest[sha]["status"] = "submitted"
+            manifest[sha]["cape_task_id"] = task_id
+            save_manifest(args.manifest, manifest)
+            submitted += 1
+            print(f"      -> task {task_id}")
+        else:
+            manifest[sha]["notes"] = (manifest[sha].get("notes", "") + ";submit_failed").strip(";")
+            save_manifest(args.manifest, manifest)
+            failed += 1
+        time.sleep(args.delay)
+
+    print("\n" + "=" * 60)
+    if args.dry_run:
+        print(f"Would submit: {len(selected)}")
+    else:
+        print(f"Submitted:    {submitted}")
+        if failed:
+            print(f"Failed:       {failed}")
+        if missing:
+            print(f"Missing file: {missing}")
+        print(f"Still pending: {total_pending - submitted}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Collect ransomware samples from MalwareBazaar with duplicate prevention.")
@@ -317,6 +418,15 @@ def main():
                          help="Query and report what would be downloaded, but download nothing")
     parser.add_argument("--delay", type=float, default=1.0,
                          help="Seconds to wait between downloads (be polite to the API)")
+    parser.add_argument("--submit-pending", type=int, metavar="N", default=None,
+                         help="Skip the API entirely: submit N samples already downloaded "
+                              "and marked pending in the manifest. Lets downloading and "
+                              "submitting be decoupled, so analysis settings can be changed "
+                              "between batches instead of being fixed for a whole queue.")
+    parser.add_argument("--order", choices=["balanced", "added"], default="balanced",
+                         help="With --submit-pending: 'balanced' round-robins across "
+                              "families so a batch is not dominated by whichever family "
+                              "happened to have the most samples; 'added' is oldest-first.")
     parser.add_argument("--submit", action="store_true",
                          help="Submit each newly downloaded sample to CAPE and record "
                               "the returned task id in the manifest automatically")
@@ -354,6 +464,11 @@ def main():
         print("[!] requests not installed (pip install requests)")
         sys.exit(1)
 
+    # Submitting already-downloaded samples needs no API key.
+    if args.submit_pending is not None:
+        run_submit_pending(args)
+        return
+
     auth_key = get_auth_key()
     samples_dir = Path(args.samples_dir)
     if not args.dry_run:
@@ -380,9 +495,17 @@ def main():
             print("   (no results)\n")
             continue
 
+        n_returned = len(entries)
+        filtered_out = []
         if args.file_type:
-            entries = [e for e in entries
-                       if (e.get("file_type") or "").lower() == args.file_type.lower()]
+            wanted = args.file_type.lower()
+            kept = []
+            for e in entries:
+                if (e.get("file_type") or "").lower() == wanted:
+                    kept.append(e)
+                else:
+                    filtered_out.append(e)
+            entries = kept
 
         new_entries, dupe_count = [], 0
         for entry in entries:
@@ -396,7 +519,22 @@ def main():
 
         total_new += len(new_entries)
         total_dupe += dupe_count
-        print(f"   {len(entries)} returned | {len(new_entries)} new | {dupe_count} already known")
+
+        # Report the pre-filter count separately: otherwise "3 requested,
+        # 2 returned" looks like the API ran short when in fact a sample was
+        # dropped locally for having the wrong file type.
+        line = f"   API returned {n_returned}"
+        if args.file_type:
+            line += f" | {len(entries)} match file_type={args.file_type}"
+        line += f" | {len(new_entries)} new | {dupe_count} already known"
+        print(line)
+
+        if filtered_out:
+            types = defaultdict(int)
+            for e in filtered_out:
+                types[e.get("file_type") or "(unknown)"] += 1
+            detail = ", ".join(f"{t}={n}" for t, n in sorted(types.items()))
+            print(f"   (skipped {len(filtered_out)} of other types: {detail})")
 
         for entry in new_entries:
             sha = entry["sha256_hash"]

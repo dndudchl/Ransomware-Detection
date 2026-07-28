@@ -227,7 +227,8 @@ def extract_sample(zip_bytes, sha256, samples_dir):
 
 
 def submit_to_cape(sample_path, sha256, cape_dir, poetry_bin, staging_dir,
-                    timeout, machine=None, dry_run=False):
+                    timeout, machine=None, route=None, enforce_timeout=False,
+                    package=None, dry_run=False):
     """
     Submit one sample to CAPE and return the assigned task id, or None.
 
@@ -246,10 +247,19 @@ def submit_to_cape(sample_path, sha256, cape_dir, poetry_bin, staging_dir,
     """
     staged = Path(staging_dir) / f"{sha256[:16]}.exe"
 
-    cmd_str = (f"cd {cape_dir} && {poetry_bin} run python3 utils/submit.py "
-               f"--package exe --timeout {timeout} --enforce-timeout")
+    # Both "python" and "python3" resolve inside the poetry environment on
+    # this host; python3 is used because that is what the first successful
+    # automated submission ran with.
+    cmd_str = f"cd {cape_dir} && {poetry_bin} run python3 utils/submit.py"
     if machine:
         cmd_str += f" --machine {machine}"
+    if route:
+        cmd_str += f" --route {route}"
+    cmd_str += f" --timeout {timeout}"
+    if enforce_timeout:
+        cmd_str += " --enforce-timeout"
+    if package:
+        cmd_str += f" --package {package}"
     cmd_str += f" {staged}"
     full_cmd = ["sudo", "-u", "cape", "bash", "-c", cmd_str]
 
@@ -316,8 +326,24 @@ def main():
                          help=f"Absolute path to poetry (default: {DEFAULT_POETRY_BIN})")
     parser.add_argument("--staging-dir", default=DEFAULT_STAGING_DIR,
                          help=f"Directory CAPE can read samples from (default: {DEFAULT_STAGING_DIR})")
-    parser.add_argument("--cape-timeout", type=int, default=200,
-                         help="Analysis timeout in seconds passed to CAPE (default: 200)")
+    parser.add_argument("--cape-timeout", type=int, default=300,
+                         help="Analysis timeout in seconds passed to CAPE (default: 300)")
+    parser.add_argument("--route", default=None,
+                         help="CAPE network route for the guest: none, inetsim, internet. "
+                              "Left unset, CAPE's configured default applies. Samples that "
+                              "wait on a C2 server before encrypting will not trigger "
+                              "without network access.")
+    parser.add_argument("--enforce-timeout", action="store_true",
+                         help="Keep each analysis running for the full timeout even after "
+                              "the sample exits. Catches payloads that start late, but since "
+                              "most samples fail immediately it also multiplies total run "
+                              "time -- roughly 3x fewer samples per day at a 10%% trigger rate.")
+    parser.add_argument("--package", default=None,
+                         help="CAPE analysis package (e.g. exe, dll). Left unset, CAPE "
+                              "detects the type itself. Auto-detection is the safer default "
+                              "here because MalwareBazaar's file_type is not always right: "
+                              "a query filtered to file_type=exe returned an entry named "
+                              "MFCLibrary7.dll, which forcing --package exe would mis-run.")
     parser.add_argument("--machine", default=None,
                          help="Specific CAPE machine to submit to (e.g. cuckoo1)")
     args = parser.parse_args()
@@ -410,7 +436,9 @@ def main():
             if args.submit:
                 task_id = submit_to_cape(
                     out_path, sha, args.cape_dir, args.poetry_bin,
-                    args.staging_dir, args.cape_timeout, args.machine)
+                    args.staging_dir, args.cape_timeout, args.machine,
+                    route=args.route, enforce_timeout=args.enforce_timeout,
+                    package=args.package)
                 if task_id:
                     manifest[sha]["status"] = "submitted"
                     manifest[sha]["cape_task_id"] = task_id

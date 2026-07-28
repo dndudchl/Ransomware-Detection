@@ -67,17 +67,42 @@ DEFAULT_VICTIM_DIRS = [
     "\\Users\\admin\\Downloads",
 ]
 
-# Extensions of the planted decoy documents.
-VICTIM_FILE_EXTENSIONS = {
-    "docx", "doc", "docm", "pptx", "ppt", "xlsx", "xls", "csv", "pdf",
-    "txt", "rtf", "py", "pyw", "ipynb", "rmd", "png", "jpg", "jpeg", "zip",
-}
+# Files that live inside the decoy folders but are not decoys: shell
+# metadata, caches, profile data. Everything else under those folders is
+# treated as a planted document.
+#
+# This replaced an allowlist of document extensions. The allowlist silently
+# discarded any decoy whose type had not been anticipated: the decoy set
+# contains real coursework files with extensions such as .vdfx and .2mdl,
+# and excluding them cost 60% of the detected damage even for WannaCry
+# (147 files actually destroyed vs 57 counted). An exclusion list fails in
+# the safer direction -- an unlisted noise file inflates the count slightly,
+# whereas an unlisted decoy type made real attacks invisible.
+DECOY_NOISE_FRAGMENTS = [
+    "\\appdata\\", "desktop.ini", "thumbs.db", "\\.ssh\\",
+    "\\searches\\", "\\contacts\\", "\\favorites\\", "\\links\\",
+    "ntuser.dat", "\\microsoft\\",
+]
 
 FILE_EVENT_TYPES = ["read", "write", "delete", "move", "copy", "execute"]
 DESTRUCTIVE_EVENT_TYPES = ["write", "delete", "move"]
 
-# Destructive events on decoy documents required to call it real encryption.
-MIN_DESTRUCTIVE_VICTIM_EVENTS = 20
+# Distinct decoy files that must be written, deleted or renamed before the
+# run counts as real encryption.
+#
+# Counting distinct FILES rather than events is what makes this work across
+# encryption styles. WannaCry reads a file, writes an encrypted copy and
+# deletes the original -- several events per file. AvosLocker overwrites the
+# file in place -- one event per file. Measured on the same decoy set, the
+# event counts differed by more than an order of magnitude while the file
+# counts stayed comparable, so an event threshold tuned on one style missed
+# the other entirely.
+#
+# The value 3 sits in an empty band in the observed data: confirmed
+# encrypting runs damaged 4, 13, 16, 17, 147 and 147 files, while every
+# non-encrypting run damaged 0 or 1. It rests on only six positive examples
+# and should be revisited once more confirmed runs exist.
+MIN_DESTROYED_DECOY_FILES = 3
 
 MANIFEST_FIELDNAMES = [
     "sha256", "original_filename", "family", "source", "label",
@@ -157,16 +182,30 @@ def get_extension(path):
 
 
 def path_in_victim_dirs(path, victim_dirs):
+    """Inside a decoy folder and not one of the known non-decoy files."""
     if not path:
         return False
     lowered = path.lower()
-    return any(v.lower() in lowered for v in victim_dirs)
+    if not any(v.lower() in lowered for v in victim_dirs):
+        return False
+    return not any(noise in lowered for noise in DECOY_NOISE_FRAGMENTS)
 
 
 def stage2_victim_check(report, victim_dirs):
-    """Returns (destructive_victim_events, distinct_victim_files, per_type_counts)."""
+    """
+    Returns (destroyed_files, read_only_files, destructive_events, per_type_counts).
+
+    destroyed_files is the primary signal: distinct decoy paths that were
+    written, deleted or renamed.
+
+    read_only_files is tracked separately and deliberately excluded from the
+    verdict. An archiver reads every document in the decoy folders without
+    harming any of them -- the 7-Zip run read 56 decoys and destroyed none.
+    Counting reads would classify that as encryption.
+    """
     victim_counts = defaultdict(int)
-    victim_paths = set()
+    destroyed_paths = set()
+    read_paths = set()
 
     for event in report.get("behavior", {}).get("enhanced", []) or []:
         if event.get("object") != "file":
@@ -177,13 +216,16 @@ def stage2_victim_check(report, victim_dirs):
         path = event.get("data", {}).get("file", "")
         if not path_in_victim_dirs(path, victim_dirs):
             continue
-        if get_extension(path) not in VICTIM_FILE_EXTENSIONS:
-            continue
-        victim_counts[event_type] += 1
-        victim_paths.add(path)
 
-    destructive = sum(victim_counts.get(t, 0) for t in DESTRUCTIVE_EVENT_TYPES)
-    return destructive, len(victim_paths), dict(victim_counts)
+        victim_counts[event_type] += 1
+        if event_type in DESTRUCTIVE_EVENT_TYPES:
+            destroyed_paths.add(path)
+        elif event_type == "read":
+            read_paths.add(path)
+
+    read_paths -= destroyed_paths
+    destructive_events = sum(victim_counts.get(t, 0) for t in DESTRUCTIVE_EVENT_TYPES)
+    return len(destroyed_paths), len(read_paths), destructive_events, dict(victim_counts)
 
 
 # ---------------- Combined verdict ----------------
@@ -200,18 +242,23 @@ def analyze(report, victim_dirs):
                        f"(calls={stats['total_calls']}, "
                        f"destructive_events={stats['destructive_events']})"),
             **stats,
+            "destroyed_decoy_files": 0,
+            "read_only_decoy_files": 0,
             "destructive_victim_events": 0,
-            "distinct_victim_files": 0,
         }
 
-    destructive_victim, distinct_victim, victim_counts = stage2_victim_check(report, victim_dirs)
+    destroyed, read_only, destructive_events, victim_counts = stage2_victim_check(
+        report, victim_dirs)
 
-    if destructive_victim >= MIN_DESTRUCTIVE_VICTIM_EVENTS:
+    if destroyed >= MIN_DESTROYED_DECOY_FILES:
         verdict = "TRUE_ENCRYPTION"
-        reason = f"attacked {distinct_victim} decoy files"
-    elif destructive_victim > 0:
+        reason = f"destroyed {destroyed} decoy files"
+    elif destroyed > 0:
         verdict = "WEAK_VICTIM_ACTIVITY"
-        reason = f"only {destructive_victim} destructive events on decoys"
+        reason = f"only {destroyed} decoy file(s) destroyed"
+    elif read_only > 0:
+        verdict = "NO_VICTIM_ACTIVITY"
+        reason = f"read {read_only} decoy files but destroyed none"
     else:
         verdict = "NO_VICTIM_ACTIVITY"
         reason = "ran but never touched decoy files (self-unpack / evasion)"
@@ -220,8 +267,9 @@ def analyze(report, victim_dirs):
         "verdict": verdict,
         "reason": reason,
         **stats,
-        "destructive_victim_events": destructive_victim,
-        "distinct_victim_files": distinct_victim,
+        "destroyed_decoy_files": destroyed,
+        "read_only_decoy_files": read_only,
+        "destructive_victim_events": destructive_events,
         "victim_reads": victim_counts.get("read", 0),
         "victim_writes": victim_counts.get("write", 0),
         "victim_deletes": victim_counts.get("delete", 0),
@@ -315,7 +363,7 @@ RESULT_FIELDNAMES = [
     "malscore", "cape_family",
     "total_calls", "destructive_events",
     "file_reads", "file_writes", "file_deletes", "file_moves",
-    "destructive_victim_events", "distinct_victim_files",
+    "destroyed_decoy_files", "read_only_decoy_files", "destructive_victim_events",
 ]
 
 
@@ -357,9 +405,11 @@ def print_single(result):
 
     if result["verdict"] != "FAILED":
         print(f"\n[Stage 2: decoy files]")
-        print(f"   destructive events on decoys : {result['destructive_victim_events']}"
-              f" (threshold {MIN_DESTRUCTIVE_VICTIM_EVENTS})")
-        print(f"   distinct decoy files touched : {result['distinct_victim_files']}")
+        print(f"   decoy files destroyed  : {result['destroyed_decoy_files']}"
+              f" (threshold {MIN_DESTROYED_DECOY_FILES})")
+        print(f"   decoy files only read  : {result['read_only_decoy_files']}"
+              f"  (reads alone never count as encryption)")
+        print(f"   destructive events     : {result['destructive_victim_events']}")
     else:
         print(f"\n[Stage 2: decoy files] skipped (sample did not execute)")
 
@@ -394,13 +444,14 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
         return results
 
     header = (f"{'task':<7} {'sha256':<18} {'verdict':<22} {'calls':>7} "
-              f"{'destr':>7} {'victim':>7} {'files':>6}")
+              f"{'destr':>7} {'DESTROYED':>10} {'read':>6}")
     print(header)
     print("-" * len(header))
     for r in results:
         print(f"{r['task_id']:<7} {r['sha256'][:16]:<18} {r['verdict']:<22} "
               f"{r['total_calls']:>7} {r['destructive_events']:>7} "
-              f"{r['destructive_victim_events']:>7} {r['distinct_victim_files']:>6}")
+              f"{r.get('destroyed_decoy_files', 0):>10} "
+              f"{r.get('read_only_decoy_files', 0):>6}")
 
     counts = defaultdict(int)
     for r in results:

@@ -419,18 +419,42 @@ def select_pending(manifest, count, order):
     return selected
 
 
-def count_in_flight(manifest):
+def count_in_flight(manifest, analyses_dir=None):
     """
-    Approximate how much work is already with CAPE.
+    How much work is actually still with CAPE.
 
-    Counts manifest entries that were submitted but have no verdict yet. This
-    slightly over-counts, because an analysis that has finished still looks
-    "in flight" until run_pipeline records its result. Treating finished work
-    as still in flight is the safe direction: it delays topping up rather
-    than flooding the queue.
+    An earlier version counted manifest entries marked submitted with no
+    verdict yet. That deadlocked: a verdict is only written when run_pipeline
+    is run with --manifest, so during any period when the pipeline was not
+    being run that way, the count grew without bound and topping up stopped
+    entirely -- it reached 113 against a target of 20 while the sandbox sat
+    idle.
+
+    Completion is directly observable instead: CAPE writes
+    <analyses_dir>/<task_id>/reports/report.json when an analysis finishes.
+    An entry is in flight only while that file is absent, which is true both
+    for queued tasks (no directory yet) and running ones.
+
+    A finished analysis whose directory was later removed by the cleanup
+    stage would look unfinished by that test, but cleanup only runs after the
+    pipeline has recorded a result, so those entries are excluded first.
     """
-    return sum(1 for row in manifest.values()
-               if row.get("status") == "submitted" and not (row.get("result") or "").strip())
+    in_flight = 0
+    for row in manifest.values():
+        if row.get("status") != "submitted":
+            continue
+        if (row.get("result") or "").strip():
+            continue          # already judged
+        task_id = (row.get("cape_task_id") or "").strip()
+        if not task_id:
+            in_flight += 1    # submitted but no id recorded; assume pending
+            continue
+        if analyses_dir:
+            report = Path(analyses_dir) / task_id / "reports" / "report.json"
+            if report.exists():
+                continue      # finished, whatever the manifest says
+        in_flight += 1
+    return in_flight
 
 
 def run_submit_pending(args):
@@ -451,7 +475,7 @@ def run_submit_pending(args):
     # means the machine never idles while analysis settings can still be
     # changed for whatever is submitted next.
     batch_size = args.submit_pending
-    in_flight = count_in_flight(manifest)
+    in_flight = count_in_flight(manifest, args.analyses_dir)
     if args.max_in_flight:
         room = args.max_in_flight - in_flight
         if room <= 0:
@@ -578,6 +602,9 @@ def main():
                               "and marked pending in the manifest. Lets downloading and "
                               "submitting be decoupled, so analysis settings can be changed "
                               "between batches instead of being fixed for a whole queue.")
+    parser.add_argument("--analyses-dir", default=DEFAULT_CAPE_DIR + "/storage/analyses",
+                         help="CAPE analyses directory, used to tell which submitted "
+                              "analyses have actually finished")
     parser.add_argument("--max-in-flight", type=int, default=None, metavar="N",
                          help="With --submit-pending: submit only enough to bring the "
                               "number of outstanding analyses up to N. Intended for cron, "

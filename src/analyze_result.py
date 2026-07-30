@@ -104,6 +104,28 @@ DESTRUCTIVE_EVENT_TYPES = ["write", "delete", "move"]
 # and should be revisited once more confirmed runs exist.
 MIN_DESTROYED_DECOY_FILES = 3
 
+# Append-renames that count as encryption on their own, regardless of where
+# they happened.
+#
+# The decoy check assumes the sample reaches Desktop, Documents or Downloads.
+# Several families do not within the analysis window: one Cuba run renamed
+# 4,890 files under Program Files and never got that far; a Clop run worked
+# through AppData; SunCrypt went through System32. All were plainly
+# encrypting and all scored zero decoy damage.
+#
+# Chosen from the labelled batch. Across 12 confirmed-encrypting runs the
+# decoy check had missed, and 17 runs where nothing happened:
+#
+#     threshold 3  -> recovers 11/12, but wrongly flags 1 of the 17
+#     threshold 8  -> recovers 10/12, wrongly flags none
+#     threshold 20 -> recovers  8/12, wrongly flags none
+#
+# Eight is the point where recovery is highest at no cost. The two runs it
+# still misses are genuinely ambiguous on this signal: one encrypting run
+# made 4 append-renames while a non-encrypting one made 5, so no threshold
+# separates them.
+MIN_APPEND_RENAMES = 8
+
 MANIFEST_FIELDNAMES = [
     "sha256", "original_filename", "family", "source", "label",
     "added_date", "status", "cape_task_id", "result", "notes",
@@ -302,25 +324,29 @@ def analyze(report, victim_dirs):
     stats["append_renames"] = n_append
     stats["distinct_rename_suffixes"] = n_suffixes
 
-    if not executed:
-        # Stage 2 is meaningless if the sample never really ran.
-        return {
-            "verdict": "FAILED",
-            "reason": (f"insufficient execution "
-                       f"(calls={stats['total_calls']}, "
-                       f"destructive_events={stats['destructive_events']})"),
-            **stats,
-            "destroyed_decoy_files": 0,
-            "read_only_decoy_files": 0,
-            "destructive_victim_events": 0,
-        }
-
     destroyed, read_only, destructive_events, victim_counts = stage2_victim_check(
         report, victim_dirs)
 
+    # Two independent kinds of evidence, either of which settles it.
+    #
+    # Decoy damage is the stronger signal but only fires if the sample got as
+    # far as the decoy folders. Append-renaming fires wherever the sample was
+    # working, so it catches families that spend the whole window elsewhere.
+    # They are checked before the execution gate because a run can be judged
+    # to have "not executed" on call counts while still having renamed files,
+    # and a rename is direct evidence that encryption happened.
     if destroyed >= MIN_DESTROYED_DECOY_FILES:
         verdict = "TRUE_ENCRYPTION"
         reason = f"destroyed {destroyed} decoy files"
+    elif n_append >= MIN_APPEND_RENAMES:
+        verdict = "TRUE_ENCRYPTION"
+        reason = (f"{n_append} append-renames outside the decoy folders "
+                  f"({n_suffixes} distinct suffix"
+                  f"{'es' if n_suffixes != 1 else ''})")
+    elif not executed:
+        verdict = "FAILED"
+        reason = (f"insufficient execution (calls={stats['total_calls']}, "
+                  f"destructive_events={stats['destructive_events']})")
     elif destroyed > 0:
         verdict = "WEAK_VICTIM_ACTIVITY"
         reason = f"only {destroyed} decoy file(s) destroyed"
@@ -485,9 +511,9 @@ def print_single(result):
     # Always shown. A run judged FAILED or NO_VICTIM can still have renamed
     # thousands of files outside the decoy folders, which is exactly the case
     # this measurement exists to surface.
-    print(f"\n[Measured, not yet used in the verdict]")
-    print(f"   append-renames anywhere : {result.get('append_renames', 0)}"
-          f"  (file.docx -> file.docx.suffix)")
+    print(f"\n[Encryption outside the decoy folders]")
+    print(f"   append-renames          : {result.get('append_renames', 0)}"
+          f"  (threshold {MIN_APPEND_RENAMES}; file.docx -> file.docx.suffix)")
     print(f"   distinct new suffixes   : {result.get('distinct_rename_suffixes', 0)}"
           f"  (1 = one shared family extension; many = a per-file hash)")
 

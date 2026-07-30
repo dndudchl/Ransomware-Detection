@@ -175,6 +175,30 @@ def stage1_execution_check(report):
 
 # ---------------- Stage 2: victim-file check ----------------
 
+def event_paths(event):
+    """
+    Paths involved in a file event.
+
+    Most events carry a single path in data.file, but a move carries
+    data.from and data.to instead -- data.file is absent. Reading only
+    data.file therefore discarded every move event, and move is precisely
+    how several ransomware families encrypt: the original is renamed to an
+    encrypted counterpart (file.docx -> file.docx.cipher4). In one analysis
+    240 move events were dropped this way, which is why runs that had
+    visibly encrypted the decoys reported zero damage.
+
+    For a move, the SOURCE is what matters: the decoy file ceased to exist
+    under its own name. The destination is the attacker's new artefact, and
+    counting it as well would double the tally for a single file.
+    """
+    data = event.get("data", {}) or {}
+    single = data.get("file")
+    if single:
+        return [single]
+    source = data.get("from")
+    return [source] if source else []
+
+
 def get_extension(path):
     if not path or "." not in path.split("\\")[-1]:
         return "(none)"
@@ -213,15 +237,14 @@ def stage2_victim_check(report, victim_dirs):
         event_type = event.get("event")
         if event_type not in FILE_EVENT_TYPES:
             continue
-        path = event.get("data", {}).get("file", "")
-        if not path_in_victim_dirs(path, victim_dirs):
-            continue
-
-        victim_counts[event_type] += 1
-        if event_type in DESTRUCTIVE_EVENT_TYPES:
-            destroyed_paths.add(path)
-        elif event_type == "read":
-            read_paths.add(path)
+        for path in event_paths(event):
+            if not path_in_victim_dirs(path, victim_dirs):
+                continue
+            victim_counts[event_type] += 1
+            if event_type in DESTRUCTIVE_EVENT_TYPES:
+                destroyed_paths.add(path)
+            elif event_type == "read":
+                read_paths.add(path)
 
     read_paths -= destroyed_paths
     destructive_events = sum(victim_counts.get(t, 0) for t in DESTRUCTIVE_EVENT_TYPES)

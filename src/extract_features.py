@@ -127,6 +127,24 @@ def parse_ts(ts):
         return None
 
 
+def event_paths(event):
+    """
+    Paths involved in a file event.
+
+    A move carries data.from and data.to rather than data.file, so reading
+    only data.file silently discarded every move -- and renaming the original
+    to an encrypted counterpart (file.docx -> file.docx.cipher4) is how
+    several families encrypt. The source path is used, since that is the
+    original file which ceased to exist.
+    """
+    data = event.get("data", {}) or {}
+    single = data.get("file")
+    if single:
+        return [single]
+    source = data.get("from")
+    return [source] if source else []
+
+
 def get_extension(path):
     if not path or "." not in path.split("\\")[-1]:
         return "(none)"
@@ -213,8 +231,14 @@ def extract_lifecycle_events(report):
         ts = parse_ts(event.get("timestamp"))
         if not ts:
             continue
-        path = event.get("data", {}).get("file", "")
-        events.append((ts, event_type, get_extension(path), path))
+        paths = event_paths(event)
+        if not paths:
+            # Keep the event so counts and ratios stay correct even when no
+            # path could be resolved; extension-based features simply skip it.
+            events.append((ts, event_type, "(none)", ""))
+            continue
+        for path in paths:
+            events.append((ts, event_type, get_extension(path), path))
     return events
 
 

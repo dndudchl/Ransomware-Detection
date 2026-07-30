@@ -154,6 +154,48 @@ def count_file_events(report):
     return counts
 
 
+def count_append_renames(report):
+    """
+    Renames that keep the original filename intact and append a suffix:
+    file.docx -> file.docx.cuba
+
+    This is measured because the decoy-based check has a structural blind
+    spot. It assumes the sample reaches the decoy folders, and several
+    families do not within the analysis window -- one Cuba run renamed 4,779
+    files under Program Files/Adobe and never touched Desktop or Documents,
+    so it scored zero despite plainly encrypting.
+
+    Append-renaming is location-independent, which is the point. It is also
+    family-independent in a way that matching a specific extension is not:
+    Cuba appends ".cuba" to every file, Clop appends ".Clop", but SunCrypt
+    appends a different 64-character hash per file, so counting files sharing
+    one new extension would miss it entirely. What they have in common is the
+    shape of the rename, not the string.
+
+    Normal software rarely does this. Temporary files are renamed to a
+    different name rather than an extended one, and backup tools tend to
+    insert rather than append. Log rotation is the notable exception
+    (app.log -> app.log.1), which is why the count matters and not merely
+    its presence.
+
+    Returned but NOT yet used in the verdict: the threshold should come from
+    the observed distribution against labelled data, not from guesswork.
+    """
+    total = 0
+    suffixes = defaultdict(int)
+    for event in report.get("behavior", {}).get("enhanced", []) or []:
+        if event.get("object") != "file" or event.get("event") != "move":
+            continue
+        data = event.get("data", {}) or {}
+        src, dst = data.get("from"), data.get("to")
+        if not src or not dst:
+            continue
+        if dst.startswith(src) and len(dst) > len(src):
+            total += 1
+            suffixes[dst[len(src):]] += 1
+    return total, len(suffixes), dict(suffixes)
+
+
 def stage1_execution_check(report):
     """Returns (executed: bool, stats: dict)."""
     total_calls = count_total_calls(report)
@@ -256,6 +298,9 @@ def stage2_victim_check(report, victim_dirs):
 def analyze(report, victim_dirs):
     """Run both stages and return a result dict."""
     executed, stats = stage1_execution_check(report)
+    n_append, n_suffixes, _ = count_append_renames(report)
+    stats["append_renames"] = n_append
+    stats["distinct_rename_suffixes"] = n_suffixes
 
     if not executed:
         # Stage 2 is meaningless if the sample never really ran.
@@ -387,6 +432,7 @@ RESULT_FIELDNAMES = [
     "total_calls", "destructive_events",
     "file_reads", "file_writes", "file_deletes", "file_moves",
     "destroyed_decoy_files", "read_only_decoy_files", "destructive_victim_events",
+    "append_renames", "distinct_rename_suffixes",
 ]
 
 
@@ -436,6 +482,15 @@ def print_single(result):
     else:
         print(f"\n[Stage 2: decoy files] skipped (sample did not execute)")
 
+    # Always shown. A run judged FAILED or NO_VICTIM can still have renamed
+    # thousands of files outside the decoy folders, which is exactly the case
+    # this measurement exists to surface.
+    print(f"\n[Measured, not yet used in the verdict]")
+    print(f"   append-renames anywhere : {result.get('append_renames', 0)}"
+          f"  (file.docx -> file.docx.suffix)")
+    print(f"   distinct new suffixes   : {result.get('distinct_rename_suffixes', 0)}"
+          f"  (1 = one shared family extension; many = a per-file hash)")
+
     print(f"\n[Verdict] {result['verdict']}")
     print(f"   {result['reason']}")
     if result["verdict"] == "TRUE_ENCRYPTION":
@@ -466,15 +521,17 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
                 print(r["task_id"])
         return results
 
-    header = (f"{'task':<7} {'sha256':<18} {'verdict':<22} {'calls':>7} "
-              f"{'destr':>7} {'DESTROYED':>10} {'read':>6}")
+    header = (f"{'task':<7} {'verdict':<22} {'family':<16} {'calls':>7} "
+              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5}")
     print(header)
     print("-" * len(header))
     for r in results:
-        print(f"{r['task_id']:<7} {r['sha256'][:16]:<18} {r['verdict']:<22} "
-              f"{r['total_calls']:>7} {r['destructive_events']:>7} "
+        print(f"{r['task_id']:<7} {r['verdict']:<22} {str(r.get('cape_family',''))[:14]:<16} "
+              f"{r['total_calls']:>7} "
               f"{r.get('destroyed_decoy_files', 0):>10} "
-              f"{r.get('read_only_decoy_files', 0):>6}")
+              f"{r.get('read_only_decoy_files', 0):>6} "
+              f"{r.get('append_renames', 0):>10} "
+              f"{r.get('distinct_rename_suffixes', 0):>5}")
 
     counts = defaultdict(int)
     for r in results:

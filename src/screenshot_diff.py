@@ -108,11 +108,36 @@ TASKBAR_HEIGHT = 48
 # reading as much as encryption did.
 TOAST_X_FROM, TOAST_Y_FROM = 0.60, 0.66
 
-# Provisional: see the module docstring. Confirmed encrypting runs measured
-# 8.3% (partial) and 16.7-17.9% (complete), so this sits below the weakest
-# observed positive. It has NOT been checked against analyses where nothing
-# happened, so the false-positive rate is unknown.
-CELL_CHANGE_THRESHOLD = 0.05
+# Region the decoy icons occupy, as fractions of width and height. Measured
+# from the analysis VM's desktop layout, which is fixed because every run
+# starts from the same snapshot.
+#
+# Restricting the measurement here fixes a specific failure. In a batch of 101
+# hand-labelled analyses, nine runs where nothing was encrypted read 28-33%
+# because a decryptor application window had opened. That window sits in the
+# middle of the screen; the decoy icons sit in the left column. Measuring only
+# the icon region ignores centred windows while still catching encryption,
+# which alters every icon.
+ICON_REGION_X_TO, ICON_REGION_Y_TO = 0.34, 0.91
+
+# A screenshot whose pixels are this uniform is a transition artefact (screen
+# blanking, a full-screen solid colour) rather than a view of the desktop.
+# Two analyses ended on an all-black frame and read 100% changed, which is
+# true but says nothing about encryption.
+UNIFORM_SHOT_STD_MAX = 6.0
+
+# How many screenshots to compare the first one against. Comparing only the
+# last one misses encryption that was undone before the run ended: two
+# analyses re-created the original icons at the end and read 3.6% and 5.4%
+# despite having encrypted the decoys mid-run. Sampling across the whole
+# sequence and keeping the maximum catches those, without the cost of
+# comparing against all of what can be a hundred frames.
+MAX_COMPARISONS = 20
+
+# Provisional. Confirmed encrypting runs measured 16-33% of icon-region cells;
+# runs where nothing happened measured 0-6%. Calibrate with --calibrate once
+# verdicts are available for a batch.
+CELL_CHANGE_THRESHOLD = 0.10
 
 
 def list_shots(analysis_dir):
@@ -157,18 +182,61 @@ def changed_pixel_mask(first_path, last_path):
     return max_channel.point(lambda v: 255 if v > PIXEL_TOLERANCE else 0), a.size
 
 
-def cell_is_masked(x0, y0, x1, y1, w, h):
-    """True for grid cells covering the taskbar or the notification corner."""
+def cell_is_masked(x0, y0, x1, y1, w, h, icon_region_only):
+    """
+    True for grid cells that should not be measured.
+
+    Always excluded: the taskbar (its clock changes every minute) and the
+    bottom-right corner where Windows raises toast notifications unprompted --
+    one such notification shifted a reading by 26 grid cells, as much as
+    encryption itself.
+
+    Additionally excluded when icon_region_only is set: everything outside the
+    left-hand column where the decoy icons live. This is what separates
+    encryption from a centred application window.
+    """
     if y0 >= h - TASKBAR_HEIGHT:
         return True
     if x0 >= int(w * TOAST_X_FROM) and y0 >= int(h * TOAST_Y_FROM):
         return True
+    if icon_region_only:
+        if x0 >= int(w * ICON_REGION_X_TO) or y0 >= int(h * ICON_REGION_Y_TO):
+            return True
     return False
 
 
-def measure(first_path, last_path):
+def is_uniform(path):
+    """
+    True when a screenshot is a near-solid colour, which means it captured a
+    blank or transitioning screen rather than the desktop.
+    """
+    try:
+        from PIL import Image, ImageStat
+        img = Image.open(path).convert("L")
+        return ImageStat.Stat(img).stddev[0] < UNIFORM_SHOT_STD_MAX
+    except Exception:
+        return False
+
+
+def sample_shots(shots, limit):
+    """
+    Evenly spaced subset of the later screenshots, always including the last.
+    Comparing the first frame against several later ones catches encryption
+    that was reverted before the run finished.
+    """
+    later = shots[1:]
+    if len(later) <= limit:
+        return later
+    step = len(later) / limit
+    picked = [later[int(i * step)] for i in range(limit)]
+    if later[-1] not in picked:
+        picked[-1] = later[-1]
+    return picked
+
+
+def measure(first_path, other_path, icon_region_only=True):
     """Fraction of usable grid cells that changed, plus supporting numbers."""
-    result = changed_pixel_mask(first_path, last_path)
+    result = changed_pixel_mask(first_path, other_path)
     if result is None:
         return None
     mask, (w, h) = result
@@ -181,7 +249,7 @@ def measure(first_path, last_path):
         for gx in range(GRID_X):
             x0, y0 = gx * cw, gy * ch
             x1, y1 = min(x0 + cw, w), min(y0 + ch, h)
-            if cell_is_masked(x0, y0, x1, y1, w, h):
+            if cell_is_masked(x0, y0, x1, y1, w, h, icon_region_only):
                 continue
             usable_cells += 1
             cell = mask.crop((x0, y0, x1, y1))
@@ -205,22 +273,40 @@ def measure(first_path, last_path):
     }
 
 
-def analyse_one(analysis_dir, threshold):
+def analyse_one(analysis_dir, threshold, icon_region_only=True,
+                 max_comparisons=MAX_COMPARISONS):
+    """
+    Compare the opening screenshot against several later ones and keep the
+    largest change. The peak is what matters: encryption that was reverted
+    before the run ended still happened.
+    """
     shots = list_shots(analysis_dir)
     task = Path(analysis_dir).name
     blank = {
         "task_id": task, "n_shots": len(shots),
         "cells_changed": "", "cells_usable": "",
         "cell_change_fraction": "", "pixel_change_fraction": "",
-        "visual_change": "unknown",
+        "visual_change": "unknown", "peak_shot": "",
         "first_shot": str(shots[0]) if shots else "", "last_shot": "",
     }
 
     if len(shots) < 2:
         return blank
 
-    m = measure(shots[0], shots[-1])
-    if m is None:
+    candidates = [p for p in sample_shots(shots, max_comparisons) if not is_uniform(p)]
+    if not candidates:
+        # Every later frame was blank; nothing comparable was captured.
+        blank["visual_change"] = "unreadable"
+        blank["last_shot"] = str(shots[-1])
+        return blank
+
+    best, best_path = None, None
+    for path in candidates:
+        m = measure(shots[0], path, icon_region_only)
+        if m and (best is None or m["cell_change_fraction"] > best["cell_change_fraction"]):
+            best, best_path = m, path
+
+    if best is None:
         blank["visual_change"] = "unreadable"
         blank["last_shot"] = str(shots[-1])
         return blank
@@ -228,11 +314,12 @@ def analyse_one(analysis_dir, threshold):
     return {
         "task_id": task,
         "n_shots": len(shots),
-        "cells_changed": m["cells_changed"],
-        "cells_usable": m["cells_usable"],
-        "cell_change_fraction": round(m["cell_change_fraction"], 4),
-        "pixel_change_fraction": round(m["pixel_change_fraction"], 4),
-        "visual_change": "yes" if m["cell_change_fraction"] >= threshold else "no",
+        "cells_changed": best["cells_changed"],
+        "cells_usable": best["cells_usable"],
+        "cell_change_fraction": round(best["cell_change_fraction"], 4),
+        "pixel_change_fraction": round(best["pixel_change_fraction"], 4),
+        "visual_change": "yes" if best["cell_change_fraction"] >= threshold else "no",
+        "peak_shot": Path(best_path).name,
         "first_shot": str(shots[0]),
         "last_shot": str(shots[-1]),
     }
@@ -267,7 +354,7 @@ def classify_agreement(verdict, visual_change):
 
 FIELDNAMES = ["task_id", "n_shots", "cells_changed", "cells_usable",
               "cell_change_fraction", "pixel_change_fraction", "visual_change",
-              "verdict", "destroyed_decoy_files", "agreement",
+              "peak_shot", "verdict", "destroyed_decoy_files", "agreement",
               "first_shot", "last_shot"]
 
 
@@ -325,6 +412,13 @@ def main():
     parser.add_argument("--threshold", type=float, default=CELL_CHANGE_THRESHOLD,
                          help=f"Cell-change fraction above which the desktop counts as "
                               f"changed (default: {CELL_CHANGE_THRESHOLD}, provisional)")
+    parser.add_argument("--whole-screen", action="store_true",
+                         help="Measure the whole frame instead of just the icon region. "
+                              "Restricting to the icon region is the default because a "
+                              "centred application window otherwise reads as encryption.")
+    parser.add_argument("--max-comparisons", type=int, default=MAX_COMPARISONS,
+                         help=f"How many later screenshots to compare the first against "
+                              f"(default: {MAX_COMPARISONS})")
     parser.add_argument("--calibrate", action="store_true",
                          help="Print the distribution of readings per verdict, to choose "
                               "a threshold from data instead of guessing")
@@ -342,9 +436,11 @@ def main():
         print(f"[!] no analysis directories under {args.analyses_dir}")
         sys.exit(1)
 
-    print(f"Comparing first and last screenshot of {len(dirs)} analyses")
-    print(f"(threshold: {args.threshold} of grid cells; taskbar and notification "
-          f"corner ignored)\n")
+    region = "whole frame" if args.whole_screen else "icon region only"
+    print(f"Comparing the opening screenshot of {len(dirs)} analyses against up to "
+          f"{args.max_comparisons} later ones, keeping the peak change")
+    print(f"(threshold: {args.threshold} of grid cells; {region}; taskbar and "
+          f"notification corner ignored)\n")
 
     header = (f"{'task':<7} {'shots':>6} {'cells':>8} {'changed':>9} {'visual':<9} "
               f"{'verdict':<22} {'files':>6} agreement")
@@ -353,7 +449,9 @@ def main():
 
     rows = []
     for d in dirs:
-        row = analyse_one(d, args.threshold)
+        row = analyse_one(d, args.threshold,
+                          icon_region_only=not args.whole_screen,
+                          max_comparisons=args.max_comparisons)
         info = verdicts.get(row["task_id"], {})
         row["verdict"] = info.get("verdict", "")
         row["destroyed_decoy_files"] = info.get("destroyed", "")

@@ -94,6 +94,33 @@ FIELDNAMES = [
     "added_date", "status", "cape_task_id", "result", "notes",
 ]
 
+# How many times a sample may fail submission before it is set aside.
+MAX_SUBMIT_ATTEMPTS = 3
+
+# Default upper bound on sample size, in bytes.
+#
+# This must stay aligned with max_sample_size in CAPE's web.conf. CAPE drops
+# anything larger during demux, and submit.py then reports only a bare
+# "Error: adding task to database", so an oversized sample looks like a
+# mysterious failure rather than a size rejection. Filtering at download time
+# keeps the two limits together: whatever gets downloaded can be submitted.
+#
+# Set to 50 MB to match a raised web.conf. Changing it here alone is not
+# enough -- web.conf must agree, or oversized samples will download and then
+# fail to submit.
+DEFAULT_MAX_SAMPLE_BYTES = 50_000_000
+
+
+def count_submit_attempts(notes):
+    """Read the attempt counter previously stored in the notes field."""
+    match = re.search(r"submit_failed_x(\d+)", notes or "")
+    return int(match.group(1)) if match else 0
+
+
+def strip_attempt_marker(notes):
+    return re.sub(r";?submit_failed_x\d+", "", notes or "")
+
+
 # Families we have empirically observed detonating successfully.
 SUGGESTED_FAMILIES = ["Cuba", "Babuk", "RansomEXX", "AvosLocker", "SunCrypt"]
 
@@ -160,6 +187,58 @@ def query_family(session, auth_key, family, limit):
         return []
 
     return payload.get("data", []) or []
+
+
+def query_tag(session, auth_key, tag, limit):
+    """
+    Query MalwareBazaar by tag rather than by family signature.
+
+    The two queries cover different ground. A signature query returns that
+    family's whole inventory (MedusaLocker has 71 samples on the platform, so
+    asking for 1000 returns all 71). A tag query returns the most recent
+    samples carrying the tag, across all families, capped at 1000.
+
+    So a tag query gives breadth -- including families we would not have
+    thought to name -- while signature queries give depth on families we
+    already care about. Neither replaces the other.
+    """
+    try:
+        response = session.post(
+            API_URL,
+            data={"query": "get_taginfo", "tag": tag, "limit": str(limit)},
+            headers={"Auth-Key": auth_key},
+            timeout=60,
+        )
+    except Exception as e:
+        print(f"   [!] request failed for tag {tag}: {e}")
+        return []
+
+    if response.status_code != 200:
+        print(f"   [!] HTTP {response.status_code} for tag {tag}")
+        return []
+
+    try:
+        payload = response.json()
+    except ValueError:
+        print(f"   [!] non-JSON response for tag {tag}")
+        return []
+
+    status = payload.get("query_status")
+    if status != "ok":
+        print(f"   [!] query_status={status} for tag {tag}")
+        return []
+
+    return payload.get("data", []) or []
+
+
+def family_of(entry, fallback=""):
+    """
+    Family for a sample. Signature queries know it from the query itself;
+    tag queries have to read it from the entry, where it may be absent
+    because MalwareBazaar could not attribute the sample to a family.
+    """
+    sig = (entry.get("signature") or "").strip()
+    return sig if sig else fallback
 
 
 def download_sample(session, auth_key, sha256):
@@ -301,6 +380,17 @@ def submit_to_cape(sample_path, sha256, cape_dir, poetry_bin, staging_dir,
     return None
 
 
+def reset_failed(manifest):
+    """Return set-aside samples to the pending pool and clear their counters."""
+    n = 0
+    for row in manifest.values():
+        if row.get("status") == "submit_failed":
+            row["status"] = "pending"
+            row["notes"] = strip_attempt_marker(row.get("notes", "")).strip(";")
+            n += 1
+    return n
+
+
 def select_pending(manifest, count, order):
     """
     Choose which already-downloaded samples to submit next.
@@ -329,6 +419,20 @@ def select_pending(manifest, count, order):
     return selected
 
 
+def count_in_flight(manifest):
+    """
+    Approximate how much work is already with CAPE.
+
+    Counts manifest entries that were submitted but have no verdict yet. This
+    slightly over-counts, because an analysis that has finished still looks
+    "in flight" until run_pipeline records its result. Treating finished work
+    as still in flight is the safe direction: it delays topping up rather
+    than flooding the queue.
+    """
+    return sum(1 for row in manifest.values()
+               if row.get("status") == "submitted" and not (row.get("result") or "").strip())
+
+
 def run_submit_pending(args):
     """Submit samples already downloaded and recorded as pending."""
     manifest = load_manifest(args.manifest)
@@ -336,11 +440,31 @@ def run_submit_pending(args):
         print(f"[!] manifest is empty or missing: {args.manifest}")
         sys.exit(1)
 
+    if args.retry_failed:
+        n = reset_failed(manifest)
+        save_manifest(args.manifest, manifest)
+        print(f"Reset {n} previously failed samples back to pending\n")
+
     samples_dir = Path(args.samples_dir)
-    selected = select_pending(manifest, args.submit_pending, args.order)
+
+    # Keeping the queue at a target depth, rather than submitting everything,
+    # means the machine never idles while analysis settings can still be
+    # changed for whatever is submitted next.
+    batch_size = args.submit_pending
+    in_flight = count_in_flight(manifest)
+    if args.max_in_flight:
+        room = args.max_in_flight - in_flight
+        if room <= 0:
+            print(f"Manifest: {args.manifest}")
+            print(f"In flight: {in_flight} (target {args.max_in_flight}) -- "
+                  f"queue is full, nothing submitted")
+            return
+        batch_size = min(batch_size, room)
+
+    selected = select_pending(manifest, batch_size, args.order)
 
     total_pending = sum(1 for r in manifest.values() if r.get("status") == "pending")
-    print(f"Manifest: {args.manifest} ({total_pending} pending)")
+    print(f"Manifest: {args.manifest} ({total_pending} pending, {in_flight} in flight)")
     print(f"Submitting: {len(selected)} (order: {args.order})")
     print(f"Settings: timeout={args.cape_timeout}"
           f"{' route=' + args.route if args.route else ''}"
@@ -384,7 +508,22 @@ def run_submit_pending(args):
             submitted += 1
             print(f"      -> task {task_id}")
         else:
-            manifest[sha]["notes"] = (manifest[sha].get("notes", "") + ";submit_failed").strip(";")
+            # Count attempts so a sample CAPE will never accept (corrupt file,
+            # unsupported format) stops consuming a slot in every future batch,
+            # while a transient failure such as a database lock still gets
+            # retried.
+            notes = manifest[sha].get("notes", "")
+            attempts = count_submit_attempts(notes) + 1
+            notes = strip_attempt_marker(notes) + f";submit_failed_x{attempts}"
+            manifest[sha]["notes"] = notes.strip(";")
+
+            if attempts >= MAX_SUBMIT_ATTEMPTS:
+                manifest[sha]["status"] = "submit_failed"
+                print(f"      [!] failed {attempts}x -- marked submit_failed, "
+                      f"will not be retried")
+            else:
+                print(f"      [!] failed (attempt {attempts}/{MAX_SUBMIT_ATTEMPTS}), "
+                      f"stays pending")
             save_manifest(args.manifest, manifest)
             failed += 1
         time.sleep(args.delay)
@@ -398,14 +537,25 @@ def run_submit_pending(args):
             print(f"Failed:       {failed}")
         if missing:
             print(f"Missing file: {missing}")
-        print(f"Still pending: {total_pending - submitted}")
+        set_aside = sum(1 for r in manifest.values() if r.get("status") == "submit_failed")
+        if set_aside:
+            print(f"Set aside:    {set_aside} (retry with --retry-failed)")
+        still_pending = sum(1 for r in manifest.values() if r.get("status") == "pending")
+        print(f"Still pending: {still_pending}")
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Collect ransomware samples from MalwareBazaar with duplicate prevention.")
-    parser.add_argument("--families", nargs="+", default=SUGGESTED_FAMILIES,
-                         help=f"Family signatures to query (default: {' '.join(SUGGESTED_FAMILIES)})")
+    parser.add_argument("--families", nargs="+", default=None,
+                         help=f"Family signatures to query. Returns a family's full "
+                              f"inventory. Default when neither --families nor --tags is "
+                              f"given: {' '.join(SUGGESTED_FAMILIES)}")
+    parser.add_argument("--tags", nargs="+", default=None,
+                         help="Tags to query instead of, or as well as, families (e.g. "
+                              "ransomware). Returns the most recent samples carrying the "
+                              "tag across all families, so it finds families not named "
+                              "explicitly. Capped at 1000 per tag by the API.")
     parser.add_argument("--limit", type=int, default=10,
                          help="Max samples to request per family (default: 10)")
     parser.add_argument("--samples-dir", default="./samples",
@@ -414,6 +564,11 @@ def main():
                          help="Manifest CSV path (default: manifest.csv)")
     parser.add_argument("--file-type", default=None,
                          help="Only take samples whose file_type matches (e.g. exe)")
+    parser.add_argument("--max-size", type=int, default=DEFAULT_MAX_SAMPLE_BYTES,
+                         metavar="BYTES",
+                         help=f"Skip samples larger than this (default: "
+                              f"{DEFAULT_MAX_SAMPLE_BYTES // 1_000_000}MB, matching "
+                              f"max_sample_size in CAPE's web.conf). Pass 0 to disable.")
     parser.add_argument("--dry-run", action="store_true",
                          help="Query and report what would be downloaded, but download nothing")
     parser.add_argument("--delay", type=float, default=1.0,
@@ -423,6 +578,15 @@ def main():
                               "and marked pending in the manifest. Lets downloading and "
                               "submitting be decoupled, so analysis settings can be changed "
                               "between batches instead of being fixed for a whole queue.")
+    parser.add_argument("--max-in-flight", type=int, default=None, metavar="N",
+                         help="With --submit-pending: submit only enough to bring the "
+                              "number of outstanding analyses up to N. Intended for cron, "
+                              "so the sandbox never sits idle while still submitting in "
+                              "batches rather than flooding the queue in one go.")
+    parser.add_argument("--retry-failed", action="store_true",
+                         help="With --submit-pending: also retry samples previously set "
+                              "aside after repeated submission failures, resetting their "
+                              "attempt counter.")
     parser.add_argument("--order", choices=["balanced", "added"], default="balanced",
                          help="With --submit-pending: 'balanced' round-robins across "
                               "families so a batch is not dominated by whichever family "
@@ -471,6 +635,9 @@ def main():
         run_submit_pending(args)
         return
 
+    if not args.families and not args.tags:
+        args.families = SUGGESTED_FAMILIES
+
     auth_key = get_auth_key()
     samples_dir = Path(args.samples_dir)
     if not args.dry_run:
@@ -478,7 +645,11 @@ def main():
 
     manifest = load_manifest(args.manifest)
     print(f"Manifest: {args.manifest} ({len(manifest)} known hashes)")
-    print(f"Families: {', '.join(args.families)}   limit/family: {args.limit}")
+    if args.families:
+        print(f"Families: {', '.join(args.families)}")
+    if args.tags:
+        print(f"Tags:     {', '.join(args.tags)}")
+    print(f"Limit per query: {args.limit}")
     if args.file_type:
         print(f"Filtering to file_type == {args.file_type}")
     if args.dry_run:
@@ -489,10 +660,23 @@ def main():
     session = requests.Session()
     total_new = total_dupe = total_downloaded = total_failed = 0
     total_submitted = total_submit_failed = 0
+    family_tally = defaultdict(int)
+    # In dry-run mode nothing is written to the manifest, so a sample returned
+    # by both a tag query and a family query would otherwise be reported as
+    # new twice. Tracking it here keeps the projected totals honest.
+    seen_this_run = set()
 
-    for family in args.families:
-        print(f"[{family}]")
-        entries = query_family(session, auth_key, family, args.limit)
+    # Each unit is (kind, value): a family signature or a tag.
+    query_units = [("signature", f) for f in (args.families or [])]
+    query_units += [("tag", t) for t in (args.tags or [])]
+
+    for kind, value in query_units:
+        label = f"tag:{value}" if kind == "tag" else value
+        print(f"[{label}]")
+        if kind == "tag":
+            entries = query_tag(session, auth_key, value, args.limit)
+        else:
+            entries = query_family(session, auth_key, value, args.limit)
         if not entries:
             print("   (no results)\n")
             continue
@@ -509,15 +693,30 @@ def main():
                     filtered_out.append(e)
             entries = kept
 
+        oversized = []
+        if args.max_size:
+            kept = []
+            for e in entries:
+                try:
+                    size = int(e.get("file_size") or 0)
+                except (TypeError, ValueError):
+                    size = 0
+                if size and size > args.max_size:
+                    oversized.append((e, size))
+                else:
+                    kept.append(e)
+            entries = kept
+
         new_entries, dupe_count = [], 0
         for entry in entries:
             sha = entry.get("sha256_hash")
             if not sha:
                 continue
-            if sha in manifest:
+            if sha in manifest or sha in seen_this_run:
                 dupe_count += 1
             else:
                 new_entries.append(entry)
+                seen_this_run.add(sha)
 
         total_new += len(new_entries)
         total_dupe += dupe_count
@@ -538,13 +737,23 @@ def main():
             detail = ", ".join(f"{t}={n}" for t, n in sorted(types.items()))
             print(f"   (skipped {len(filtered_out)} of other types: {detail})")
 
+        if oversized:
+            biggest = max(size for _e, size in oversized)
+            print(f"   (skipped {len(oversized)} over {args.max_size / 1e6:.0f}MB, "
+                  f"largest {biggest / 1e6:.1f}MB -- CAPE would reject these)")
+
         for entry in new_entries:
             sha = entry["sha256_hash"]
             fname = entry.get("file_name", "")
             ftype = entry.get("file_type", "")
-            print(f"   - {sha[:16]}... {fname[:36]:<38} type={ftype}")
+            # For a signature query the family is the query term; for a tag
+            # query it comes from the entry, or is left unknown.
+            family = value if kind == "signature" else family_of(entry, "")
+            shown = family or "(unattributed)"
+            print(f"   - {sha[:16]}... {fname[:32]:<34} {shown[:16]:<18} type={ftype}")
 
             if args.dry_run:
+                family_tally[family or "(unattributed)"] += 1
                 continue
 
             zip_bytes = download_sample(session, auth_key, sha)
@@ -571,6 +780,7 @@ def main():
             }
             save_manifest(args.manifest, manifest)
             total_downloaded += 1
+            family_tally[family or "(unattributed)"] += 1
             print(f"      -> saved {out_path.name} and registered in manifest")
 
             if args.submit:
@@ -597,6 +807,10 @@ def main():
     print("=" * 60)
     print(f"New samples found:  {total_new}")
     print(f"Already in manifest: {total_dupe}")
+    if family_tally:
+        print("\nFamily mix:")
+        for fam, n in sorted(family_tally.items(), key=lambda x: -x[1]):
+            print(f"   {fam:<24} {n}")
     if not args.dry_run:
         print(f"Downloaded:          {total_downloaded}")
         print(f"Failed:              {total_failed}")

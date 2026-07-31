@@ -65,8 +65,20 @@ REPORT_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 # The analyzer says this when it could not launch the submitted file at all,
 # which is a property of the sample and will recur on every attempt.
 SAMPLE_LAUNCH_FAILURE = "unable to execute the initial process"
-# The analyzer prints this once it has finished and uploaded its results.
+
+# The analyzer prints this only when it shuts itself down, having seen the
+# sample exit. Ransomware usually keeps running until the analysis timeout,
+# at which point CAPE stops the guest and the line is never written.
+#
+# Its absence therefore does NOT indicate a problem. Treating it as one
+# classified successful runs -- 160,000 API calls, 40 screenshots -- as
+# needing to be re-submitted.
 ANALYZER_FINISHED = "analysis completed"
+
+# API calls above which the sandbox is considered to have worked, whatever
+# the log says. Matches the execution threshold used by analyze_result, so
+# the two tools agree on what "it ran" means.
+MIN_CALLS_FOR_USABLE_RUN = 500
 
 # A guest killed at the same moment as a kernel OOM is attributed to it even
 # if the recorded window is slightly off, since the clocks are seconds apart.
@@ -175,20 +187,26 @@ def classify(outcome, oom_hit, calls):
     """
     Decide whether re-submitting is worth the sandbox time.
 
-    An OOM kill inside the window is decisive on its own: the guest was
-    destroyed by the host, so nothing about the sample was established.
+    The first question is whether the run produced behavioural data, not how
+    its log ended. A ransomware sample that works keeps running until the
+    timeout, so its log has no closing line -- reading that as damage marked
+    every successful analysis for re-submission.
+
+    Only once it is established that nothing usable came out does the cause
+    matter, and then it decides whether trying again could change anything.
     """
+    if calls is not None and calls >= MIN_CALLS_FOR_USABLE_RUN:
+        return "NO_RETRY", "produced behavioural data; the sandbox worked"
+
     if oom_hit:
         return "RETRY", "guest killed by the host running out of memory"
     if outcome == "sample_launch_failed":
         return "NO_RETRY", "sample could not be launched (wrong architecture, corrupt PE)"
-    if outcome == "truncated":
-        return "RETRY", "analyzer log ends mid-run; the guest stopped unexpectedly"
     if outcome == "no_log":
         return "RETRY", "analyzer never started; the guest was not reachable"
-    if calls == 0:
-        return "NO_RETRY", "analyzer finished but recorded nothing"
-    return "NO_RETRY", "analysis completed normally"
+    if outcome == "truncated":
+        return "RETRY", "no data and the analyzer log stops mid-run"
+    return "NO_RETRY", "analyzer finished but recorded nothing"
 
 
 FIELDNAMES = ["task_id", "decision", "reason", "analyzer_outcome", "oom_hit",

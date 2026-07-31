@@ -59,6 +59,89 @@ TS_FORMAT = "%Y-%m-%d %H:%M:%S,%f"
 FILE_EVENT_TYPES = ["read", "write", "delete", "move", "copy", "execute"]
 DESTRUCTIVE_EVENT_TYPES = ["delete", "move"]
 
+# ---------------- Preparation behaviour ----------------
+#
+# Before encrypting, ransomware typically clears the ground: it deletes volume
+# shadow copies so files cannot be rolled back, disables Windows recovery,
+# and stops database, backup and mail services so their files are not held
+# open. Task 81 in this dataset did exactly this -- taskkill followed by
+# net stop on SQL services -- and then stopped, having prepared but never
+# encrypted.
+#
+# These are measured, not used in the verdict. On their own they show intent
+# rather than outcome, and treating intent as outcome would have counted that
+# run as a successful encryption. They are recorded because a detector that
+# only fires once files are already encrypted is of limited use, whereas
+# preparation happens beforehand.
+#
+# The counts alone are weak signals: installers stop services, backup tools
+# touch shadow copies, cleanup utilities kill processes. What distinguishes
+# ransomware is the sequence -- preparation followed shortly by mass file
+# destruction -- which is why the delay between the two is measured as well.
+# None of this can be trusted until the benign control set has been run
+# through the sandbox for comparison.
+COMMAND_PATTERNS = {
+    "shadow_delete": ["vssadmin", "shadowcopy", "wbadmin", "delete shadows",
+                       "delete catalog", "resize shadowstorage"],
+    "recovery_disable": ["bcdedit", "recoveryenabled", "bootstatuspolicy",
+                          "ignoreallfailures"],
+    "service_stop": ["net stop", "sc stop", "sc.exe stop", "net1 stop"],
+    "process_kill": ["taskkill", "tskill", "wmic process call terminate"],
+    "log_clear": ["wevtutil", "clear-eventlog", "cipher /w"],
+}
+
+
+def extract_preparation_features(report, lifecycle_events):
+    """
+    Ground-clearing activity, and how long before the first file was destroyed
+    it happened.
+
+    The delay is the relational part. A count of service stops says only that
+    services were stopped; a service stopped forty seconds before a thousand
+    files start being rewritten says something the counts cannot.
+    """
+    behavior = report.get("behavior", {}) or {}
+    summary = behavior.get("summary", {}) or {}
+
+    commands = [c for c in (summary.get("executed_commands") or []) if isinstance(c, str)]
+    joined = [c.lower() for c in commands]
+
+    features = {"n_executed_commands": len(commands)}
+    for name, patterns in COMMAND_PATTERNS.items():
+        features[f"n_{name}"] = sum(
+            1 for c in joined if any(pat in c for pat in patterns))
+
+    features["n_services_created"] = len(summary.get("created_services") or [])
+    features["n_services_started"] = len(summary.get("started_services") or [])
+    features["n_registry_writes"] = len(summary.get("write_keys") or [])
+    features["n_registry_deletes"] = len(summary.get("delete_keys") or [])
+
+    # Timed preparation events. Service manipulation is rare enough to be
+    # meaningful on its own; registry writes number in the thousands and are
+    # dominated by ordinary process startup, so they are counted but not used
+    # as the reference point.
+    prep_times = []
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "service":
+            continue
+        ts = parse_ts(event.get("timestamp"))
+        if ts:
+            prep_times.append(ts)
+
+    destroy_times = [ts for ts, et, _ext, _p in lifecycle_events
+                     if et in DESTRUCTIVE_EVENT_TYPES or et == "write"]
+
+    if prep_times and destroy_times:
+        delay = (min(destroy_times) - min(prep_times)).total_seconds()
+        features["prep_to_destroy_delay_sec"] = round(delay, 1)
+        features["n_service_events"] = len(prep_times)
+    else:
+        features["prep_to_destroy_delay_sec"] = ""
+        features["n_service_events"] = len(prep_times)
+
+    return features
+
+
 # ---------------- Static config ----------------
 
 IMPORT_CATEGORIES = {
@@ -596,8 +679,14 @@ STATIC_FIELDS = (["total_imports"] + [f"imp_{c}" for c in IMPORT_CATEGORIES] +
                    "categories_revealed_by_unpacking"])
 INTERACTION_FIELDS = ["crypto_imported_not_called", "crypto_called_not_imported",
                        "static_dynamic_agreement"]
+PREPARATION_FIELDS = (["n_executed_commands"] +
+                       [f"n_{k}" for k in COMMAND_PATTERNS] +
+                       ["n_services_created", "n_services_started",
+                        "n_service_events", "n_registry_writes",
+                        "n_registry_deletes", "prep_to_destroy_delay_sec"])
 
-FEATURE_FIELDNAMES = IDENTITY_FIELDS + DYNAMIC_FIELDS + STATIC_FIELDS + INTERACTION_FIELDS
+FEATURE_FIELDNAMES = (IDENTITY_FIELDS + DYNAMIC_FIELDS + STATIC_FIELDS +
+                       INTERACTION_FIELDS + PREPARATION_FIELDS)
 
 
 def get_cape_metadata(report):
@@ -651,8 +740,10 @@ def build_feature_row(report, sample_id, label, family, source, window_sec,
         dynamic = extract_dynamic_features(report, window_sec)
         row.update(dynamic)
         row.update(compute_interaction_features(static, dynamic))
+        row.update(extract_preparation_features(
+            report, extract_lifecycle_events(report)))
     else:
-        for field in DYNAMIC_FIELDS + INTERACTION_FIELDS:
+        for field in DYNAMIC_FIELDS + INTERACTION_FIELDS + PREPARATION_FIELDS:
             row[field] = ""
 
     row.update(static)

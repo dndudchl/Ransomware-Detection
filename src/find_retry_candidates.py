@@ -76,9 +76,25 @@ SAMPLE_LAUNCH_FAILURE = "unable to execute the initial process"
 ANALYZER_FINISHED = "analysis completed"
 
 # API calls above which the sandbox is considered to have worked, whatever
-# the log says. Matches the execution threshold used by analyze_result, so
-# the two tools agree on what "it ran" means.
-MIN_CALLS_FOR_USABLE_RUN = 500
+# the log says.
+#
+# This was 500, borrowed from analyze_result's "did the sample do anything"
+# gate. That is a different question. A sample can execute perfectly and make
+# very few API calls: one opened a socket, initialised Windows CNG, and sat
+# waiting for a connection that never came -- 263 calls, correctly monitored,
+# and classified as an infrastructure failure needing re-submission.
+#
+# What matters here is whether the sandbox observed the guest, not whether
+# the guest was busy. A few hundred recorded calls means the monitor was
+# attached and working.
+MIN_CALLS_FOR_USABLE_RUN = 100
+
+# CAPE writes this to its own log when the guest stops answering. It is the
+# direct statement that the guest died, as opposed to being inferred from
+# call counts, and it distinguishes a sample that ran quietly from one whose
+# guest was lost after recording a handful of calls.
+AGENT_DEAD_RE = re.compile(r"Task #(\d+):.*Agent is dead")
+CAPE_LOG = "/opt/CAPEv2/log/cuckoo.log"
 
 # A guest killed at the same moment as a kernel OOM is attributed to it even
 # if the recorded window is slightly off, since the clocks are seconds apart.
@@ -88,6 +104,22 @@ MANIFEST_FIELDNAMES = [
     "sha256", "original_filename", "family", "source", "label",
     "added_date", "status", "cape_task_id", "result", "notes",
 ]
+
+
+def read_agent_deaths(log_path):
+    """Task ids CAPE reported as having lost their guest agent."""
+    if not os.path.exists(log_path):
+        return set()
+    ids = set()
+    try:
+        with open(log_path, "r", errors="replace") as f:
+            for line in f:
+                m = AGENT_DEAD_RE.search(line)
+                if m:
+                    ids.add(m.group(1))
+    except OSError:
+        pass
+    return ids
 
 
 def read_oom_kills():
@@ -183,7 +215,7 @@ def total_calls(analysis_dir):
                for p in data.get("behavior", {}).get("processes", []) or [])
 
 
-def classify(outcome, oom_hit, calls):
+def classify(outcome, oom_hit, calls, agent_died):
     """
     Decide whether re-submitting is worth the sandbox time.
 
@@ -195,8 +227,13 @@ def classify(outcome, oom_hit, calls):
     Only once it is established that nothing usable came out does the cause
     matter, and then it decides whether trying again could change anything.
     """
+    # The guest being declared dead outranks the call count: a run can record
+    # a few hundred calls and then lose its guest, which is still a lost run.
+    if agent_died:
+        return "RETRY", "CAPE reported the guest agent dead"
+
     if calls is not None and calls >= MIN_CALLS_FOR_USABLE_RUN:
-        return "NO_RETRY", "produced behavioural data; the sandbox worked"
+        return "NO_RETRY", "sandbox observed the guest; the sample was simply quiet"
 
     if oom_hit:
         return "RETRY", "guest killed by the host running out of memory"
@@ -210,7 +247,7 @@ def classify(outcome, oom_hit, calls):
 
 
 FIELDNAMES = ["task_id", "decision", "reason", "analyzer_outcome", "oom_hit",
-              "shots", "total_calls", "started", "ended",
+              "agent_died", "shots", "total_calls", "started", "ended",
               "screenshot_heuristic", "signals_agree"]
 
 
@@ -224,6 +261,9 @@ def main():
                               "are returned to pending")
     parser.add_argument("--reset-manifest", action="store_true",
                          help="Set retry candidates back to pending in the manifest")
+    parser.add_argument("--cape-log", default=CAPE_LOG,
+                         help=f"CAPE's own log, read for agent-death reports "
+                              f"(default: {CAPE_LOG})")
     parser.add_argument("--only-failed", action="store_true",
                          help="Only consider analyses with no calls recorded, which is "
                               "where sandbox failures concentrate")
@@ -238,6 +278,9 @@ def main():
     print(f"OOM kills of qemu found in the kernel log: {len(kills)}")
     for k in kills:
         print(f"   {k}")
+
+    agent_deaths = read_agent_deaths(args.cape_log)
+    print(f"Tasks whose guest agent CAPE declared dead: {len(agent_deaths)}")
     print()
 
     dirs = sorted((p for p in base.iterdir() if p.is_dir() and p.name.isdigit()),
@@ -256,7 +299,8 @@ def main():
             oom_hit = any(lo <= k <= hi for k in kills)
 
         outcome = read_analyzer_outcome(d)
-        decision, reason = classify(outcome, oom_hit, calls)
+        agent_died = d.name in agent_deaths
+        decision, reason = classify(outcome, oom_hit, calls, agent_died)
         shots = count_shots(d)
 
         # The simpler rule, kept alongside so the two can be compared.
@@ -268,6 +312,7 @@ def main():
             "reason": reason,
             "analyzer_outcome": outcome,
             "oom_hit": int(oom_hit),
+            "agent_died": int(agent_died),
             "shots": shots,
             "total_calls": "" if calls is None else calls,
             "started": started.strftime(REPORT_TIME_FORMAT) if started else "",
@@ -278,14 +323,15 @@ def main():
 
     retry = [r for r in rows if r["decision"] == "RETRY"]
 
-    header = (f"{'task':<7} {'decision':<10} {'analyzer':<22} {'oom':>4} "
+    header = (f"{'task':<7} {'decision':<10} {'analyzer':<22} {'oom':>4} {'dead':>5} "
               f"{'shots':>6} {'calls':>8} {'shot-rule':<10} {'agree'}")
     print(header)
     print("-" * len(header))
     for r in rows:
         mark = "" if r["signals_agree"] else "  <-- differ"
         print(f"{r['task_id']:<7} {r['decision']:<10} {r['analyzer_outcome']:<22} "
-              f"{r['oom_hit']:>4} {r['shots']:>6} {str(r['total_calls']):>8} "
+              f"{r['oom_hit']:>4} {r['agent_died']:>5} {r['shots']:>6} "
+              f"{str(r['total_calls']):>8} "
               f"{r['screenshot_heuristic']:<10} {r['signals_agree']}{mark}")
 
     print(f"\n=== decisions ===")

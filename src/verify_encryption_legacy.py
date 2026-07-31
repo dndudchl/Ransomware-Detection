@@ -1,82 +1,77 @@
 #!/usr/bin/env python3
 """
-verify_encryption_legacy.py - Verify victim-file attacks in legacy Cuckoo
-Sandbox reports (older report format, distinct from CAPE's report.json).
+verify_encryption_legacy.py - Decide whether a legacy Cuckoo analysis really
+encrypted the planted decoy files.
 
-Background
-----------
-This project's main tooling (triage.py, verify_encryption.py, correlate.py)
-was built against CAPE Sandbox's report.json, which includes a
-behavior.enhanced timeline: one entry per file event, with a millisecond
-timestamp, an event type (read/write/delete/move/copy), and a file path.
+This applies the corrections found by validating the CAPE verdict against
+screenshots (see docs/verification_failures.md). The same mistakes were
+present here, and for the same reasons: this script was written from the
+CAPE version and inherited its assumptions.
 
-A separate batch of ~450 older reports (Cuckoo Sandbox, single analysis VM,
-collected ~4 years prior) uses a different report structure:
-  - No behavior.enhanced field at all.
-  - File activity instead lives in behavior.summary as flat lists of file
-    paths per event type: file_written, file_deleted, file_moved,
-    file_read, file_copied. These lists have NO timestamps -- just paths,
-    possibly with duplicates.
-  - Low-level file API calls (GetFileType, NtQueryInformationFile, etc.)
-    exist in behavior.processes[].calls with a numeric "time" (unix epoch)
-    field, but they operate on file HANDLES, not paths, so they cannot be
-    directly correlated to a specific file without extra handle-tracking
-    work.
+Corrections carried over
+------------------------
+1. **Count distinct files, not events.** The original threshold was five
+   destructive events. Encryption style decides how many events one file
+   produces: writing an encrypted copy and deleting the original is roughly
+   three, overwriting in place is one. A threshold in events silently
+   encodes an assumption about the attacker's implementation. Counting
+   distinct decoy files removes it.
 
-Consequence: for this legacy dataset we can determine WHICH files were
-read/written/deleted/moved, and HOW MANY events of each type occurred,
-but NOT the timing/windowed correlation analysis that correlate.py does
-for CAPE reports. This script is therefore a triage/verification step
-only (equivalent in purpose to verify_encryption.py), not a feature
-extractor.
+2. **Exclude noise instead of allowing known types.** The original counted a
+   file only if its extension appeared in a hardcoded list of document
+   types. The decoy set is real coursework and includes extensions that were
+   never listed. On the CAPE side this discarded 60% of the observed damage
+   even for the sample the list had been validated against.
 
-A naive count of file_written/file_deleted/file_moved is misleading: this
-particular analysis VM has software installed (Python27, various Program
-Files apps) whose self-installation or runtime activity dominates the raw
-counts (e.g. one sample showed 5153 "written" files that were almost
-entirely Python standard library files, not user documents). To avoid
-this, this script restricts attention to files under the analysis user's
-profile directory (default: Users\\IEUser\\) that also look like ordinary
-user documents (by extension), and explicitly excludes known noisy
-subpaths (Python installs, Program Files, Windows system dirs, temp
-folders).
+3. **Look for append-renames, not just decoy damage.** Several families
+   spend the whole analysis window encrypting elsewhere and never reach the
+   decoy folders — one Cuba run renamed 4,779 files under Program Files and
+   scored zero. What those runs have in common is the shape of the rename:
+   the original name is kept and a suffix appended (file.docx ->
+   file.docx.cuba). That is location-independent, and family-independent in
+   a way that matching a specific extension is not, since some families use
+   one shared suffix and others a unique hash per file.
+
+A structural difference from CAPE
+---------------------------------
+CAPE records a move as `data.from` / `data.to`, so an append is directly
+observable. The legacy reports only give `behavior.summary.file_moved`, a
+flat list of paths with no pairing. Whether those are sources or
+destinations determines what can be detected:
+
+  - if destinations, an appended suffix is visible in the path itself and
+    `--rename-mode suffix` will find it;
+  - if sources, the appended name never appears and only decoy damage can
+    be measured.
+
+The mode therefore defaults to `auto`, which inspects the paths and reports
+which case it found rather than assuming one.
 
 Usage
 -----
-  # Single file
+  python3 verify_encryption_legacy.py --batch <dir> --out legacy_verify_results.csv
   python3 verify_encryption_legacy.py <report.json>
-
-  # Batch mode: scan a directory of *.json reports, write a summary CSV
-  python3 verify_encryption_legacy.py --batch <directory> --out legacy_verify_results.csv
 """
 
 import sys
+import os
+import re
 import json
-import argparse
 import csv
+import argparse
 from pathlib import Path
 from collections import defaultdict
 
-# Extensions that represent ordinary user documents (decoy-like files).
-# NOTE: "docm" (macro-enabled Word doc) and "rtf" were added after
-# inspecting real file_read entries from this dataset's decoy set
-# (C:\Users\IEUser\Desktop\test.rtf, Documents\*.docm), which the original
-# CAPE-derived extension list did not include.
-VICTIM_FILE_EXTENSIONS = {
-    "docx", "doc", "docm", "pptx", "ppt", "xlsx", "xls", "csv", "pdf",
-    "txt", "rtf", "py", "pyw", "ipynb", "rmd", "png", "jpg", "jpeg", "zip",
-}
-
-# Default victim path fragment: files under the analysis user's profile.
 DEFAULT_VICTIM_PATH_FRAGMENT = "Users\\IEUser\\"
 
-# Path fragments that indicate self-installation / system noise rather
-# than genuine victim-document activity, even if they fall under the
-# user profile (e.g. AppData\Local\Temp is technically under Users\IEUser\
-# but is where installers/self-extractors dump files).
+# Files inside the user profile that are not decoys: shell metadata, caches,
+# profile databases. Everything else under the profile is treated as a decoy.
+# This replaced an allowlist of document extensions -- see correction 2.
 NOISE_PATH_FRAGMENTS = [
     "python27", "program files", "windows\\", "appdata\\local\\temp",
     "appdata\\roaming\\microsoft", "\\config", ".net\\framework",
+    "desktop.ini", "thumbs.db", "ntuser.dat", "\\searches\\",
+    "\\contacts\\", "\\favorites\\", "\\links\\", "\\.ssh\\",
 ]
 
 SUMMARY_EVENT_KEYS = {
@@ -85,188 +80,243 @@ SUMMARY_EVENT_KEYS = {
     "delete": "file_deleted",
     "move": "file_moved",
     "copy": "file_copied",
+    "recreate": "file_recreated",
 }
-DESTRUCTIVE_EVENT_TYPES = ["write", "delete", "move"]
+DESTRUCTIVE_EVENT_TYPES = ["write", "delete", "move", "recreate"]
 
-# NOTE: this threshold was originally set to 20, matching verify_encryption.py,
-# which was calibrated against a CAPE analysis VM seeded with ~40 decoy files.
-# This legacy Cuckoo dataset appears to have a much smaller decoy set (a
-# handful of test.* files on the Desktop plus a couple of Documents files),
-# so 20 destructive events may be too high a bar and could produce false
-# NO_VICTIM_ACTIVITY verdicts for samples that did encrypt the (small) decoy
-# set. Lowered to 5 as a starting point; re-calibrate after looking at the
-# actual distribution of destructive_victim_events across the batch.
-MIN_DESTRUCTIVE_VICTIM_EVENTS = 5
+# Distinct decoy files that must be damaged. Matches the CAPE threshold,
+# which was placed in an empty band in the observed data: confirmed
+# encrypting runs damaged 4 or more, everything else damaged 0 or 1.
+MIN_DESTROYED_DECOY_FILES = 3
+
+# Append-renames that count as encryption on their own. Chosen on the CAPE
+# data, where 8 recovered 10 of 12 missed runs while wrongly flagging none
+# of 17 non-encrypting ones.
+MIN_APPEND_RENAMES = 8
+
+# Extensions that legitimately appear as the final component of a path.
+# Anything else trailing a full filename is treated as an appended suffix.
+KNOWN_EXTENSIONS = {
+    "exe", "dll", "sys", "txt", "log", "tmp", "dat", "ini", "xml", "json",
+    "docx", "doc", "docm", "xlsx", "xls", "pptx", "ppt", "pdf", "rtf", "csv",
+    "png", "jpg", "jpeg", "gif", "bmp", "ico", "zip", "rar", "7z", "gz",
+    "py", "pyw", "pyc", "js", "html", "htm", "css", "cfg", "conf", "bak",
+    "db", "sqlite", "lnk", "url", "msi", "cab", "inf", "cat", "mui", "man",
+    "ipynb", "rmd", "vdfx", "2mdl", "search-ms", "contact", "customdestinations-ms",
+}
+
+DOUBLE_EXTENSION_RE = re.compile(r"\.([^.\\/]+)\.([^.\\/]+)$")
 
 
-def get_extension(path):
-    if not path or '.' not in path.split('\\')[-1]:
-        return "(none)"
-    return path.split('.')[-1].lower()
-
-
-def is_victim_path(path, victim_fragment):
+def is_decoy_path(path, victim_fragment):
     if not path:
         return False
     lowered = path.lower()
     if victim_fragment.lower() not in lowered:
         return False
-    if any(noise in lowered for noise in NOISE_PATH_FRAGMENTS):
+    return not any(noise in lowered for noise in NOISE_PATH_FRAGMENTS)
+
+
+def looks_like_append_rename(path):
+    """
+    True when a path ends in two extensions and the last one is not a known
+    file type: report.docx.cuba, notes.txt.7254C3DA...
+
+    This only works when the list being examined holds destination paths. If
+    it holds sources, the appended suffix was never recorded and this will
+    correctly find nothing.
+    """
+    m = DOUBLE_EXTENSION_RE.search(path or "")
+    if not m:
         return False
-    return True
+    inner, outer = m.group(1).lower(), m.group(2).lower()
+    if outer in KNOWN_EXTENSIONS:
+        return False
+    # The inner component should look like a real extension, so that
+    # "archive.tar.gz" style names and version numbers are not mistaken for
+    # ransomware suffixes.
+    return inner in KNOWN_EXTENSIONS
 
 
-def analyze_report(report, victim_fragment):
-    """
-    Returns:
-      victim_counts: dict event_type -> count (paths matching victim
-                     criteria: under victim_fragment, document extension,
-                     not in a noise subpath)
-      victim_paths: set of distinct victim paths touched (any event type)
-      raw_counts: dict event_type -> total count in summary (unfiltered,
-                  for context / sanity-checking how much noise was excluded)
-    """
-    summary = report.get("behavior", {}).get("summary", {})
+def analyze(report, victim_fragment):
+    summary = report.get("behavior", {}).get("summary", {}) or {}
 
-    victim_counts = defaultdict(int)
-    victim_paths = set()
+    destroyed_paths = set()
+    read_paths = set()
     raw_counts = defaultdict(int)
+    append_paths = set()
+    append_suffixes = defaultdict(int)
 
-    for event_type, summary_key in SUMMARY_EVENT_KEYS.items():
-        paths = summary.get(summary_key, []) or []
+    for event_type, key in SUMMARY_EVENT_KEYS.items():
+        paths = summary.get(key, []) or []
         raw_counts[event_type] = len(paths)
         for path in paths:
             if not isinstance(path, str):
                 continue
-            if is_victim_path(path, victim_fragment) and get_extension(path) in VICTIM_FILE_EXTENSIONS:
-                victim_counts[event_type] += 1
-                victim_paths.add(path)
 
-    return victim_counts, victim_paths, raw_counts
+            # Append-renames are counted wherever they occur, not only in the
+            # decoy folders -- that is the whole point of the signal.
+            if event_type in ("move", "write", "recreate") and looks_like_append_rename(path):
+                append_paths.add(path)
+                m = DOUBLE_EXTENSION_RE.search(path)
+                if m:
+                    append_suffixes[m.group(2).lower()] += 1
 
+            if not is_decoy_path(path, victim_fragment):
+                continue
+            if event_type in DESTRUCTIVE_EVENT_TYPES:
+                destroyed_paths.add(path)
+            elif event_type == "read":
+                read_paths.add(path)
 
-def classify(victim_counts):
-    destructive = sum(victim_counts.get(t, 0) for t in DESTRUCTIVE_EVENT_TYPES)
-    if destructive >= MIN_DESTRUCTIVE_VICTIM_EVENTS:
-        return "TRUE_ENCRYPTION", destructive
-    if destructive > 0:
-        return "WEAK_VICTIM_ACTIVITY", destructive
-    return "NO_VICTIM_ACTIVITY", destructive
-
-
-def analyze_one_file(report_path, victim_fragment):
-    try:
-        with open(report_path, "r", errors="replace") as f:
-            report = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return {
-            "file": report_path.name,
-            "verdict": f"READ_ERROR: {e}",
-            "destructive_victim_events": 0,
-            "distinct_victim_files": 0,
-            "raw_written": 0, "raw_deleted": 0, "raw_moved": 0, "raw_read": 0, "raw_copied": 0,
-        }
-
-    victim_counts, victim_paths, raw_counts = analyze_report(report, victim_fragment)
-    verdict, destructive = classify(victim_counts)
-
+    read_paths -= destroyed_paths
     return {
-        "file": report_path.name,
-        "verdict": verdict,
-        "destructive_victim_events": destructive,
-        "distinct_victim_files": len(victim_paths),
-        "raw_written": raw_counts.get("write", 0),
-        "raw_deleted": raw_counts.get("delete", 0),
-        "raw_moved": raw_counts.get("move", 0),
-        "raw_read": raw_counts.get("read", 0),
-        "raw_copied": raw_counts.get("copy", 0),
+        "destroyed_decoy_files": len(destroyed_paths),
+        "read_only_decoy_files": len(read_paths),
+        "append_renames": len(append_paths),
+        "distinct_rename_suffixes": len(append_suffixes),
+        "raw_counts": dict(raw_counts),
+        "top_suffixes": sorted(append_suffixes.items(), key=lambda x: -x[1])[:5],
     }
 
 
-def print_single_report(report_path, victim_fragment):
-    with open(report_path, "r", errors="replace") as f:
+def classify(result):
+    destroyed = result["destroyed_decoy_files"]
+    renames = result["append_renames"]
+
+    if destroyed >= MIN_DESTROYED_DECOY_FILES:
+        return "TRUE_ENCRYPTION", f"destroyed {destroyed} decoy files"
+    if renames >= MIN_APPEND_RENAMES:
+        return "TRUE_ENCRYPTION", (f"{renames} append-renames "
+                                   f"({result['distinct_rename_suffixes']} distinct suffixes)")
+    if destroyed > 0:
+        return "WEAK_VICTIM_ACTIVITY", f"only {destroyed} decoy file(s) destroyed"
+    if result["read_only_decoy_files"] > 0:
+        return "NO_VICTIM_ACTIVITY", (f"read {result['read_only_decoy_files']} decoy files "
+                                       f"but destroyed none")
+    return "NO_VICTIM_ACTIVITY", "no decoy activity recorded"
+
+
+FIELDNAMES = ["file", "verdict", "reason", "destroyed_decoy_files",
+              "read_only_decoy_files", "append_renames", "distinct_rename_suffixes",
+              "raw_written", "raw_deleted", "raw_moved", "raw_read"]
+
+
+def row_for(path, victim_fragment):
+    try:
+        with open(path, "r", errors="replace") as f:
+            report = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        return {"file": Path(path).name, "verdict": f"READ_ERROR", "reason": str(e)[:60]}
+
+    result = analyze(report, victim_fragment)
+    verdict, reason = classify(result)
+    raw = result["raw_counts"]
+    return {
+        "file": Path(path).name,
+        "verdict": verdict,
+        "reason": reason,
+        "destroyed_decoy_files": result["destroyed_decoy_files"],
+        "read_only_decoy_files": result["read_only_decoy_files"],
+        "append_renames": result["append_renames"],
+        "distinct_rename_suffixes": result["distinct_rename_suffixes"],
+        "raw_written": raw.get("write", 0),
+        "raw_deleted": raw.get("delete", 0),
+        "raw_moved": raw.get("move", 0),
+        "raw_read": raw.get("read", 0),
+    }
+
+
+def print_single(path, victim_fragment):
+    with open(path, "r", errors="replace") as f:
         report = json.load(f)
+    result = analyze(report, victim_fragment)
+    verdict, reason = classify(result)
 
-    victim_counts, victim_paths, raw_counts = analyze_report(report, victim_fragment)
-    verdict, destructive = classify(victim_counts)
+    print("=" * 62)
+    print(f"File: {Path(path).name}")
+    print("=" * 62)
+    print(f"\n[Raw summary counts] before any filtering")
+    for k, v in sorted(result["raw_counts"].items(), key=lambda x: -x[1]):
+        print(f"   {k:<10} {v}")
 
-    print("=" * 60)
-    print(f"File: {report_path}")
-    print(f"Victim path fragment: {victim_fragment}")
-    print("=" * 60)
+    print(f"\n[Decoy files]")
+    print(f"   destroyed              : {result['destroyed_decoy_files']}"
+          f"  (threshold {MIN_DESTROYED_DECOY_FILES})")
+    print(f"   read but not destroyed : {result['read_only_decoy_files']}"
+          f"  (reads alone never count)")
 
-    print(f"\n[Raw summary counts] (before filtering out system/self-install noise)")
-    for event_type in SUMMARY_EVENT_KEYS:
-        print(f"   {event_type:<8} {raw_counts.get(event_type, 0)}")
-
-    print(f"\n[Victim-file activity] (user-profile documents, noise excluded)")
-    for event_type in SUMMARY_EVENT_KEYS:
-        print(f"   {event_type:<8} {victim_counts.get(event_type, 0)}")
-    print(f"   distinct victim files touched: {len(victim_paths)}")
-
-    if victim_paths:
-        print(f"\n[Sample victim files touched]")
-        for path in list(victim_paths)[:10]:
-            print(f"   {path}")
+    print(f"\n[Encryption outside the decoy folders]")
+    print(f"   append-renames         : {result['append_renames']}"
+          f"  (threshold {MIN_APPEND_RENAMES})")
+    print(f"   distinct suffixes      : {result['distinct_rename_suffixes']}")
+    if result["top_suffixes"]:
+        detail = ", ".join(f".{s} x{n}" for s, n in result["top_suffixes"])
+        print(f"   most common            : {detail}")
+    elif result["raw_counts"].get("move", 0) > 0:
+        print(f"   (none found despite {result['raw_counts']['move']} moves -- this report's")
+        print(f"    file_moved list probably holds source paths, so appended suffixes")
+        print(f"    were never recorded and only decoy damage can be measured)")
 
     print(f"\n[Verdict] {verdict}")
-    print(f"   destructive victim events: {destructive} "
-          f"(threshold for TRUE_ENCRYPTION: {MIN_DESTRUCTIVE_VICTIM_EVENTS})")
+    print(f"   {reason}")
 
 
 def run_batch(directory, victim_fragment, out_csv):
-    json_files = sorted(Path(directory).glob("*.json"))
-    if not json_files:
-        print(f"[!] No .json files found in {directory}")
+    files = sorted(Path(directory).glob("*.json"))
+    if not files:
+        print(f"[!] no .json files in {directory}")
         sys.exit(1)
 
-    rows = []
-    for report_path in json_files:
-        row = analyze_one_file(report_path, victim_fragment)
-        rows.append(row)
+    rows = [row_for(p, victim_fragment) for p in files]
 
-    header = f"{'file':<70} {'verdict':<20} {'destr.':>7} {'distinct':>9} {'raw_write':>10} {'raw_del':>8} {'raw_move':>9}"
+    header = (f"{'file':<58} {'verdict':<22} {'destr':>6} {'renames':>8} {'sfx':>5}")
     print(header)
     print("-" * len(header))
     for r in rows:
-        fname = r["file"] if len(r["file"]) <= 68 else r["file"][:65] + "..."
-        print(f"{fname:<70} {r['verdict']:<20} {r['destructive_victim_events']:>7} "
-              f"{r['distinct_victim_files']:>9} {r['raw_written']:>10} {r['raw_deleted']:>8} {r['raw_moved']:>9}")
+        name = r["file"] if len(r["file"]) <= 56 else r["file"][:53] + "..."
+        print(f"{name:<58} {r.get('verdict',''):<22} "
+              f"{r.get('destroyed_decoy_files',0):>6} "
+              f"{r.get('append_renames',0):>8} "
+              f"{r.get('distinct_rename_suffixes',0):>5}")
 
     counts = defaultdict(int)
     for r in rows:
-        counts[r["verdict"]] += 1
-    print("\n[summary]", ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        counts[r.get("verdict", "?")] += 1
+    print("\n[summary] " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
 
-    fieldnames = ["file", "verdict", "destructive_victim_events", "distinct_victim_files",
-                  "raw_written", "raw_deleted", "raw_moved", "raw_read", "raw_copied"]
+    by_decoy = sum(1 for r in rows if r.get("destroyed_decoy_files", 0) >= MIN_DESTROYED_DECOY_FILES)
+    by_rename = sum(1 for r in rows if r.get("append_renames", 0) >= MIN_APPEND_RENAMES)
+    print(f"[signals] decoy damage: {by_decoy}   append-renames: {by_rename}")
+    if by_rename == 0 and any(r.get("raw_moved", 0) > 0 for r in rows):
+        print("          No append-renames found anywhere despite recorded moves.")
+        print("          These reports' file_moved lists most likely hold source paths,")
+        print("          in which case only decoy damage is measurable here.")
+
     with open(out_csv, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
         for r in rows:
-            writer.writerow({k: r.get(k, "") for k in fieldnames})
-    print(f"\n[saved] batch verification results -> {out_csv}")
-    print("        Filter for verdict == TRUE_ENCRYPTION to get samples worth")
-    print("        keeping for further feature extraction.")
+            writer.writerow({k: r.get(k, "") for k in FIELDNAMES})
+    print(f"\n[saved] {out_csv}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Verify victim-file attacks in legacy Cuckoo Sandbox reports.")
-    parser.add_argument("report_path", nargs="?", help="Path to a single report.json (single-file mode)")
-    parser.add_argument("--batch", metavar="DIRECTORY",
-                         help="Directory of *.json reports to scan in batch mode")
+        description="Verify decoy-file encryption in legacy Cuckoo reports.")
+    parser.add_argument("report_path", nargs="?", help="A single report.json")
+    parser.add_argument("--batch", metavar="DIR", help="Directory of *.json reports")
     parser.add_argument("--out", default="legacy_verify_results.csv",
-                         help="CSV output path for batch mode (default: legacy_verify_results.csv)")
+                         help="CSV output for batch mode")
     parser.add_argument("--victim-path", default=DEFAULT_VICTIM_PATH_FRAGMENT,
-                         help=f"Path fragment identifying the analysis user's profile "
+                         help=f"Analysis user profile fragment "
                               f"(default: '{DEFAULT_VICTIM_PATH_FRAGMENT}')")
     args = parser.parse_args()
 
     if args.batch:
         run_batch(args.batch, args.victim_path, args.out)
     elif args.report_path:
-        print_single_report(Path(args.report_path), args.victim_path)
+        print_single(args.report_path, args.victim_path)
     else:
         parser.print_help()
         sys.exit(1)

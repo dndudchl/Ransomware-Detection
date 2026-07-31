@@ -29,6 +29,9 @@ Nothing in the event data hinted at this. The 49 missed analyses averaged
 170,000 API calls and 455 destructive file events each; they looked busy and
 healthy.
 
+After the fixes described below, detection on the confirmed-encrypting set
+rose from 17 of 73 to 111 of 116.
+
 ## Failure 1 — counting events instead of files
 
 Covered in detail in `encryption_style_finding.md`. In short: WannaCry writes
@@ -93,7 +96,29 @@ absent. The source path is used for a move, since that is the file which
 ceased to exist under its own name; counting the destination as well would
 double the tally for one file.
 
-## Failure 4 — an in-flight count that depended on another process
+## Failure 4 — the execution gate blocked the decoy check
+
+The verdict ran in two stages: first decide whether the sample executed at
+all, then, only if it did, check whether it damaged the decoy files. The
+first stage failed a run whose total destructive file events fell below 50.
+
+That ordering discarded evidence. One run recorded 44 destructive events in
+total — below the gate — of which **21 landed on decoy files**. It was
+reported as never having executed.
+
+The gate was measuring volume as a proxy for significance. A sample that goes
+straight for the user's documents and touches nothing else is precise, not
+inactive; it produces few events and all of them matter. Meanwhile a sample
+that unpacks a Python runtime into %TEMP% clears the gate easily while doing
+nothing of interest.
+
+Fix: compute both stages unconditionally and let the evidence decide. The
+execution check now only explains *why* a run produced nothing, rather than
+deciding in advance that it did.
+
+Recovering this cost nothing and reclassified two runs immediately.
+
+## Failure 5 — an in-flight count that depended on another process
 
 Not a verification bug, but the same shape of mistake, so it belongs here.
 
@@ -120,11 +145,87 @@ form:
 | 1 | encryption writes then deletes | in-place overwriting |
 | 2 | decoy types are known in advance | real coursework file formats |
 | 3 | every event carries `data.file` | move events carry `from`/`to` |
-| 4 | another process will record completion | it was not being run that way |
+| 4 | volume of activity implies significance | a precise sample touches little |
+| 5 | another process will record completion | it was not being run that way |
 
 None produced an error. Each silently returned a plausible-looking answer,
 which is why they survived until an independent source of truth contradicted
 them.
+
+## A structural limit, and the second signal added for it
+
+Fixing the four bugs above still left runs that had visibly encrypted
+reporting nothing. These were not parsing errors. The verification design
+itself assumed the sample would reach the decoy folders, and several families
+do not within the analysis window:
+
+| Family | Where it spent the run | Decoy files damaged |
+|---|---|---|
+| Cuba | `Program Files\Adobe\Acrobat DC` — 4,779 files renamed | 0 |
+| Clop | `Users\admin\AppData` — 239 destructive events | 0 |
+| SunCrypt | `Windows\System32`, `MSOCache` | 0 |
+
+The Adobe directory alone holds thousands of files. Cuba worked through it
+for the entire window and never reached the Desktop. Raising the timeout does
+not fix this, because the ordering of the filesystem walk is not something
+the analysis window controls.
+
+What these runs have in common is not a location but the **shape of the
+rename** they perform:
+
+```
+Cuba      file.png  ->  file.png.cuba
+Clop      file.ps1  ->  file.ps1.Clop
+SunCrypt  file.xxx  ->  file.xxx.7254C3DA...  (a different hash per file)
+```
+
+Each keeps the original filename intact and appends a suffix. Matching on the
+extension string would not work — Cuba and Clop share one suffix across every
+file, while SunCrypt generates a unique 64-character suffix per file, so
+counting files that share a new extension finds Cuba and misses SunCrypt
+entirely. The invariant is the append itself.
+
+Normal software rarely appends to a full filename. Temporary files are
+renamed to a different name, and backup tools tend to insert rather than
+append. Log rotation is the exception (`app.log` -> `app.log.1`), which is why
+the count matters rather than the mere presence.
+
+The threshold was set from the labelled batch — 12 confirmed-encrypting runs
+the decoy check had missed, against 17 runs where nothing happened:
+
+| Threshold | Encrypting runs recovered | Non-encrypting runs wrongly flagged |
+|---|---|---|
+| 3 | 11 / 12 | 1 / 17 |
+| **8** | **10 / 12** | **0 / 17** |
+| 20 | 8 / 12 | 0 / 17 |
+
+Eight recovers the most at no cost. The two it still misses are genuinely
+ambiguous on this signal: one encrypting run made 4 append-renames while a
+non-encrypting one made 5, so no threshold separates them.
+
+### The two signals are complementary, and measurably so
+
+Across 116 hand-confirmed encrypting runs, 111 are now detected. Which signal
+found them:
+
+| | Runs |
+|---|---|
+| decoy damage only | 24 |
+| append-renames only | 11 |
+| both | 76 |
+| **decoy check alone would find** | **100 / 111** |
+| **rename check alone would find** | **87 / 111** |
+| **together** | **111 / 111** |
+
+Neither axis is sufficient. Netwalker never renames anything — it overwrites
+decoy files in place, so only the decoy check sees it. Cuba never reaches the
+decoys, so only the rename check sees it. Each family is invisible to one of
+the two axes and visible to the other.
+
+This is the project's central claim, measured on its own verification code
+rather than argued in the abstract: a single indicator sees one
+implementation strategy, and coverage comes from combining indicators that
+fail in different directions.
 
 ## What this means for the detection features
 

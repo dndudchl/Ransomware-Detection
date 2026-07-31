@@ -1,0 +1,6 @@
+sha256,original_filename,family,source,label,added_date,status,cape_task_id,result,notes
+d3f847b27ee6cd4f85a3393131f85f28750761fd59dd2aac95d5a8fa235d46dd,MFCLibrary7.dll,Cuba,malwarebazaar,ransomware,2026-07-28 05:13:00 UTC,submitted,65,,file_type=exe
+936119bc1811aeef01299a0150141787865a0dbe2667288f018ad24db5a7bc27,936119bc1811aeef01299a0150141787865a0dbe2667288f018ad24db5a7bc27.bin,Cuba,malwarebazaar,ransomware,2026-07-28 05:13:06 UTC,submitted,66,,file_type=exe
+482b160ee2e8d94fa6e4749f77e87da89c9658e7567459bc633d697430e3ad9a,482b160ee2e8d94fa6e4749f77e87da89c9658e7567459bc633d697430e3ad9a.bin,Cuba,malwarebazaar,ransomware,2026-07-28 05:13:10 UTC,submitted,67,,file_type=exe
+bff12a83b1fc2e0ad0000ad9b68abc8eada559bb1094caaf5b9f52887df23705,Roseland.bin,AvosLocker,malwarebazaar,ransomware,2026-07-28 05:33:52 UTC,submitted,70,,file_type=exe;resubmit_route_was_off
+0b1f19ba8740b10ed017671aab023228756a6864fb008bf23f3c606189bdcd98,0b1f19ba8740b10ed017671aab023228756a6864fb008bf23f3c606189bdcd98,AvosLocker,malwarebazaar,ransomware,2026-07-28 05:33:59 UTC,submitted,71,,file_type=exe;resubmit_route_was_off

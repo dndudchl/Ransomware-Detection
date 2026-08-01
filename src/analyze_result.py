@@ -126,6 +126,14 @@ MIN_DESTROYED_DECOY_FILES = 3
 # separates them.
 MIN_APPEND_RENAMES = 8
 
+# A note whose name does not state its purpose has to appear in at least this
+# many directories before it counts. Dropping one copy per directory is what
+# separates a ransom note from an application's readme; measured on the
+# labelled set, notes reached 2 or more directories in 36 of 57 confirmed
+# encrypting runs and in 1 of 79 runs where nothing was encrypted -- and that
+# one turned out to be encryption the manual pass had missed.
+MIN_RANSOM_NOTE_DIRS = 2
+
 MANIFEST_FIELDNAMES = [
     "sha256", "original_filename", "family", "source", "label",
     "added_date", "status", "cape_task_id", "result", "notes",
@@ -179,10 +187,24 @@ def count_file_events(report):
 # Words that appear in ransom note filenames. Matching on the name alone
 # would be noisy -- plenty of software ships a readme -- so the name is only
 # half the test.
+# Words that merely suggest a note. Software ships readmes, so these need
+# corroboration -- either the file appearing across several directories, or
+# one of the explicit words below.
 RANSOM_NOTE_WORDS = [
     "readme", "read_me", "read-me", "recover", "restore", "decrypt",
     "how_to", "howto", "how-to", "instruction", "unlock", "ransom",
     "help_", "_info", "-info", "files_back", "your_files", "important",
+]
+
+# Words that state the purpose outright. Observed note names in this dataset
+# include "#howtorecover.txt", "readme_to_decrypt.txt", "restore-my-files.txt"
+# and "readmefordecrypt.txt"; no benign file in the labelled set carries one.
+# A name like this is taken as sufficient on its own, because some families
+# drop their note in a single directory and would otherwise go unnoticed.
+RANSOM_NOTE_EXPLICIT = [
+    "decrypt", "recover", "restore", "unlock", "ransom",
+    "howto", "how_to", "how-to", "how to",
+    "files_back", "filesback", "your_files", "yourfiles", "getback", "get_back",
 ]
 # Extensions a ransom note will never have. This is an exclusion list rather
 # than a list of permitted document types, because an allowlist only sees the
@@ -244,13 +266,20 @@ def detect_ransom_notes(report):
             by_basename[basename].add(directory)
 
     if not by_basename:
-        return {"ransom_note_dirs": 0, "ransom_note_name": "", "ransom_note_candidates": 0}
+        return {"ransom_note_dirs": 0, "ransom_note_name": "",
+                "ransom_note_candidates": 0, "ransom_note_explicit": 0}
 
-    name, dirs = max(by_basename.items(), key=lambda kv: len(kv[1]))
+    # Prefer a name that states its purpose; otherwise the widest spread.
+    explicit = {n: d for n, d in by_basename.items()
+                if any(w in n for w in RANSOM_NOTE_EXPLICIT)}
+    source = explicit or by_basename
+    name, dirs = max(source.items(), key=lambda kv: len(kv[1]))
+
     return {
         "ransom_note_dirs": len(dirs),
         "ransom_note_name": name[:60],
         "ransom_note_candidates": len(by_basename),
+        "ransom_note_explicit": int(bool(explicit)),
     }
 
 
@@ -283,6 +312,7 @@ def count_append_renames(report):
     """
     total = 0
     suffixes = defaultdict(int)
+
     for event in report.get("behavior", {}).get("enhanced", []) or []:
         if event.get("object") != "file" or event.get("event") != "move":
             continue
@@ -293,6 +323,32 @@ def count_append_renames(report):
         if dst.startswith(src) and len(dst) > len(src):
             total += 1
             suffixes[dst[len(src):]] += 1
+
+    # The same transformation is often not recorded as a move at all. One
+    # family writes X.exe and separately deletes X, which leaves no move
+    # event and so scored zero append-renames despite doing this to 45 files,
+    # every original deleted. Reconstructing the pairs from the summary lists
+    # catches that: a written path that extends a deleted path is a rename
+    # however the sandbox chose to log it.
+    summary = report.get("behavior", {}).get("summary", {}) or {}
+    written = {p for p in (summary.get("write_files") or []) if isinstance(p, str)}
+    deleted = {p for p in (summary.get("delete_files") or []) if isinstance(p, str)}
+
+    if written and deleted:
+        # Index by directory so each written path is only compared against
+        # deletions from the same place, rather than every deletion.
+        by_dir = defaultdict(list)
+        for path in deleted:
+            by_dir[path.rsplit("\\", 1)[0] if "\\" in path else ""].append(path)
+
+        for path in written:
+            directory = path.rsplit("\\", 1)[0] if "\\" in path else ""
+            for original in by_dir.get(directory, ()):
+                if path != original and path.startswith(original) and len(path) > len(original):
+                    total += 1
+                    suffixes[path[len(original):]] += 1
+                    break
+
     return total, len(suffixes), dict(suffixes)
 
 
@@ -402,6 +458,8 @@ def analyze(report, victim_dirs):
     stats["append_renames"] = n_append
     stats["distinct_rename_suffixes"] = n_suffixes
     stats.update(detect_ransom_notes(report))
+    note_dirs = stats.get("ransom_note_dirs", 0)
+    note_explicit = stats.get("ransom_note_explicit", 0)
 
     destroyed, read_only, destructive_events, victim_counts = stage2_victim_check(
         report, victim_dirs)
@@ -422,6 +480,14 @@ def analyze(report, victim_dirs):
         reason = (f"{n_append} append-renames outside the decoy folders "
                   f"({n_suffixes} distinct suffix"
                   f"{'es' if n_suffixes != 1 else ''})")
+    elif note_explicit or note_dirs >= MIN_RANSOM_NOTE_DIRS:
+        # A third kind of evidence, independent of both file damage and
+        # renaming: the demand itself. It catches families that encrypt
+        # somewhere the decoy check cannot see and rename in a way the
+        # append check cannot read.
+        verdict = "TRUE_ENCRYPTION"
+        reason = (f"ransom note '{stats.get('ransom_note_name','')}' in "
+                  f"{note_dirs} director{'ies' if note_dirs != 1 else 'y'}")
     elif not executed:
         verdict = "FAILED"
         reason = (f"insufficient execution (calls={stats['total_calls']}, "
@@ -539,6 +605,7 @@ RESULT_FIELDNAMES = [
     "destroyed_decoy_files", "read_only_decoy_files", "destructive_victim_events",
     "append_renames", "distinct_rename_suffixes",
     "ransom_note_dirs", "ransom_note_name", "ransom_note_candidates",
+    "ransom_note_explicit",
 ]
 
 
@@ -600,10 +667,12 @@ def print_single(result):
     note_dirs = result.get("ransom_note_dirs", 0)
     print(f"\n[Ransom note]")
     if note_dirs:
+        explicit = result.get("ransom_note_explicit", 0)
         print(f"   '{result.get('ransom_note_name','')}' written into {note_dirs} "
-              f"director{'ies' if note_dirs != 1 else 'y'}")
-        if note_dirs == 1:
-            print(f"   (one directory only -- could equally be an ordinary readme)")
+              f"director{'ies' if note_dirs != 1 else 'y'}"
+              f"{'  [name states its purpose]' if explicit else ''}")
+        if note_dirs < MIN_RANSOM_NOTE_DIRS and not explicit:
+            print(f"   (one directory and a generic name -- could be an ordinary readme)")
     else:
         print(f"   none found")
 

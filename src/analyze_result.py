@@ -176,6 +176,84 @@ def count_file_events(report):
     return counts
 
 
+# Words that appear in ransom note filenames. Matching on the name alone
+# would be noisy -- plenty of software ships a readme -- so the name is only
+# half the test.
+RANSOM_NOTE_WORDS = [
+    "readme", "read_me", "read-me", "recover", "restore", "decrypt",
+    "how_to", "howto", "how-to", "instruction", "unlock", "ransom",
+    "help_", "_info", "-info", "files_back", "your_files", "important",
+]
+# Extensions a ransom note will never have. This is an exclusion list rather
+# than a list of permitted document types, because an allowlist only sees the
+# formats someone thought of in advance: an earlier version listed txt, html,
+# rtf and so on, and therefore missed three analyses whose note was named
+# readme.md. The same mistake had already cost 60% of the observed damage
+# when decoy files were filtered by extension.
+NON_NOTE_EXTENSIONS = {
+    "exe", "dll", "sys", "drv", "ocx", "cpl", "scr", "com", "msi", "cab",
+    "tmp", "log", "dat", "db", "sqlite", "etl", "evtx", "pf", "mui",
+}
+
+
+def detect_ransom_notes(report):
+    """
+    Ransom notes, identified by the fact that the same file is written into
+    many directories at once.
+
+    The filename alone is a weak signal: readme.txt is ordinary. What is not
+    ordinary is dropping an identically-named file into every directory the
+    program touched. Ransomware does this so the victim finds the note
+    wherever they look; nothing benign has a reason to.
+
+    Returns the widest such spread found, plus the name responsible. A note
+    seen in a single directory is reported but carries little weight.
+    """
+    by_basename = defaultdict(set)
+
+    for event in report.get("behavior", {}).get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        if event.get("event") not in ("write", "move"):
+            continue
+
+        # Unlike decoy damage, which is about the file that disappeared, a
+        # ransom note is the file that appears -- so a move contributes its
+        # destination here, where event_paths() returns its source.
+        data = event.get("data", {}) or {}
+        candidates = []
+        if data.get("file"):
+            candidates.append(data["file"])
+        if data.get("to"):
+            candidates.append(data["to"])
+
+        for path in candidates:
+            if not path:
+                continue
+            parts = path.replace("/", "\\").split("\\")
+            if len(parts) < 2:
+                continue
+            basename = parts[-1].lower()
+            directory = "\\".join(parts[:-1]).lower()
+
+            ext = basename.rsplit(".", 1)[-1] if "." in basename else ""
+            if ext in NON_NOTE_EXTENSIONS:
+                continue
+            if not any(word in basename for word in RANSOM_NOTE_WORDS):
+                continue
+            by_basename[basename].add(directory)
+
+    if not by_basename:
+        return {"ransom_note_dirs": 0, "ransom_note_name": "", "ransom_note_candidates": 0}
+
+    name, dirs = max(by_basename.items(), key=lambda kv: len(kv[1]))
+    return {
+        "ransom_note_dirs": len(dirs),
+        "ransom_note_name": name[:60],
+        "ransom_note_candidates": len(by_basename),
+    }
+
+
 def count_append_renames(report):
     """
     Renames that keep the original filename intact and append a suffix:
@@ -323,6 +401,7 @@ def analyze(report, victim_dirs):
     n_append, n_suffixes, _ = count_append_renames(report)
     stats["append_renames"] = n_append
     stats["distinct_rename_suffixes"] = n_suffixes
+    stats.update(detect_ransom_notes(report))
 
     destroyed, read_only, destructive_events, victim_counts = stage2_victim_check(
         report, victim_dirs)
@@ -459,6 +538,7 @@ RESULT_FIELDNAMES = [
     "file_reads", "file_writes", "file_deletes", "file_moves",
     "destroyed_decoy_files", "read_only_decoy_files", "destructive_victim_events",
     "append_renames", "distinct_rename_suffixes",
+    "ransom_note_dirs", "ransom_note_name", "ransom_note_candidates",
 ]
 
 
@@ -517,6 +597,16 @@ def print_single(result):
     print(f"   distinct new suffixes   : {result.get('distinct_rename_suffixes', 0)}"
           f"  (1 = one shared family extension; many = a per-file hash)")
 
+    note_dirs = result.get("ransom_note_dirs", 0)
+    print(f"\n[Ransom note]")
+    if note_dirs:
+        print(f"   '{result.get('ransom_note_name','')}' written into {note_dirs} "
+              f"director{'ies' if note_dirs != 1 else 'y'}")
+        if note_dirs == 1:
+            print(f"   (one directory only -- could equally be an ordinary readme)")
+    else:
+        print(f"   none found")
+
     print(f"\n[Verdict] {result['verdict']}")
     print(f"   {result['reason']}")
     if result["verdict"] == "TRUE_ENCRYPTION":
@@ -548,7 +638,7 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
         return results
 
     header = (f"{'task':<7} {'verdict':<22} {'family':<16} {'calls':>7} "
-              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5}")
+              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5} {'note':>6}")
     print(header)
     print("-" * len(header))
     for r in results:
@@ -557,7 +647,8 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
               f"{r.get('destroyed_decoy_files', 0):>10} "
               f"{r.get('read_only_decoy_files', 0):>6} "
               f"{r.get('append_renames', 0):>10} "
-              f"{r.get('distinct_rename_suffixes', 0):>5}")
+              f"{r.get('distinct_rename_suffixes', 0):>5} "
+              f"{r.get('ransom_note_dirs', 0):>6}")
 
     counts = defaultdict(int)
     for r in results:

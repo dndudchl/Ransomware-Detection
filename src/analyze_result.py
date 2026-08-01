@@ -134,6 +134,24 @@ MIN_APPEND_RENAMES = 8
 # one turned out to be encryption the manual pass had missed.
 MIN_RANSOM_NOTE_DIRS = 2
 
+# How many kinds of evidence must show something before a run counts as
+# encryption on corroboration alone, with no single one reaching its own
+# threshold.
+#
+# Each axis has a threshold set so that it is safe by itself, which makes
+# each one blind just below that line: two destroyed decoy files, or four
+# append-renames, or a note in one directory. Measured across the labelled
+# set, that blindness is not symmetric. Of 79 runs where nothing was
+# encrypted -- including ten that were thoroughly active, one of them writing
+# 921 files -- not a single one registered on ANY axis. Every axis stayed at
+# zero. Meanwhile 56 of 59 confirmed encrypting runs registered on at least
+# one, and 51 on two or more.
+#
+# So a run showing faint traces on two independent axes is not two
+# coincidences. It is the pattern the thresholds were built to catch, seen
+# from just below each of them.
+MIN_CORROBORATING_AXES = 2
+
 MANIFEST_FIELDNAMES = [
     "sha256", "original_filename", "family", "source", "label",
     "added_date", "status", "cape_task_id", "result", "notes",
@@ -464,6 +482,10 @@ def analyze(report, victim_dirs):
     destroyed, read_only, destructive_events, victim_counts = stage2_victim_check(
         report, victim_dirs)
 
+    # Independent kinds of evidence, counted regardless of magnitude.
+    corroborating_axes = sum([destroyed > 0, n_append > 0, note_dirs > 0])
+    stats["corroborating_axes"] = corroborating_axes
+
     # Two independent kinds of evidence, either of which settles it.
     #
     # Decoy damage is the stronger signal but only fires if the sample got as
@@ -480,6 +502,11 @@ def analyze(report, victim_dirs):
         reason = (f"{n_append} append-renames outside the decoy folders "
                   f"({n_suffixes} distinct suffix"
                   f"{'es' if n_suffixes != 1 else ''})")
+    elif corroborating_axes >= MIN_CORROBORATING_AXES:
+        verdict = "TRUE_ENCRYPTION"
+        reason = (f"corroborating evidence on {corroborating_axes} axes "
+                  f"({destroyed} decoy files, {n_append} append-renames, "
+                  f"note in {note_dirs}), none conclusive alone")
     elif note_explicit or note_dirs >= MIN_RANSOM_NOTE_DIRS:
         # A third kind of evidence, independent of both file damage and
         # renaming: the demand itself. It catches families that encrypt
@@ -605,7 +632,7 @@ RESULT_FIELDNAMES = [
     "destroyed_decoy_files", "read_only_decoy_files", "destructive_victim_events",
     "append_renames", "distinct_rename_suffixes",
     "ransom_note_dirs", "ransom_note_name", "ransom_note_candidates",
-    "ransom_note_explicit",
+    "ransom_note_explicit", "corroborating_axes",
 ]
 
 
@@ -664,6 +691,11 @@ def print_single(result):
     print(f"   distinct new suffixes   : {result.get('distinct_rename_suffixes', 0)}"
           f"  (1 = one shared family extension; many = a per-file hash)")
 
+    axes = result.get("corroborating_axes", 0)
+    print(f"\n[Corroboration]")
+    print(f"   evidence axes showing anything : {axes}/3"
+          f"  (threshold {MIN_CORROBORATING_AXES} when none is conclusive alone)")
+
     note_dirs = result.get("ransom_note_dirs", 0)
     print(f"\n[Ransom note]")
     if note_dirs:
@@ -707,7 +739,7 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
         return results
 
     header = (f"{'task':<7} {'verdict':<22} {'family':<16} {'calls':>7} "
-              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5} {'note':>6}")
+              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5} {'note':>6} {'axes':>5}")
     print(header)
     print("-" * len(header))
     for r in results:
@@ -717,7 +749,8 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
               f"{r.get('read_only_decoy_files', 0):>6} "
               f"{r.get('append_renames', 0):>10} "
               f"{r.get('distinct_rename_suffixes', 0):>5} "
-              f"{r.get('ransom_note_dirs', 0):>6}")
+              f"{r.get('ransom_note_dirs', 0):>6} "
+              f"{r.get('corroborating_axes', 0):>5}")
 
     counts = defaultdict(int)
     for r in results:

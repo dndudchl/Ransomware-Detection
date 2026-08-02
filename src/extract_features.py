@@ -91,6 +91,48 @@ COMMAND_PATTERNS = {
 }
 
 
+# Utilities whose launch is itself the act. Matching on the process name
+# rather than the command line is what makes these usable for timing: the
+# command list carries no timestamps, while every process records when it
+# started.
+#
+# It also sidesteps an evasion seen in the data. One sample invoked
+# "C:\fqkq\..\Windows\yaxq\qp\d\..\..\..\system32\lu\n\..\..\wbem\cl\oj\..\..\wmic.exe
+# shadowcopy delete" -- padding the path with fake directories and traversals
+# to defeat exact-path matching. The process name survives that intact.
+PREPARATION_PROCESSES = {
+    "vssadmin.exe": "shadow",
+    "wmic.exe": "shadow",          # almost always "shadowcopy delete" in this set
+    "wbadmin.exe": "shadow",
+    "bcdedit.exe": "recovery",
+    "net.exe": "service",
+    "net1.exe": "service",
+    "sc.exe": "service",
+    "taskkill.exe": "kill",
+    "wevtutil.exe": "logs",
+    "schtasks.exe": "persistence",
+    "reg.exe": "persistence",
+}
+
+
+def preparation_process_times(report):
+    """
+    When each ground-clearing utility was launched.
+
+    Returns a list of (timestamp, category), sorted.
+    """
+    out = []
+    for process in report.get("behavior", {}).get("processes", []) or []:
+        name = (process.get("process_name") or "").lower()
+        category = PREPARATION_PROCESSES.get(name)
+        if not category:
+            continue
+        ts = parse_ts(process.get("first_seen"))
+        if ts:
+            out.append((ts, category))
+    return sorted(out)
+
+
 def extract_preparation_features(report, lifecycle_events):
     """
     Ground-clearing activity, and how long before the first file was destroyed
@@ -138,6 +180,51 @@ def extract_preparation_features(report, lifecycle_events):
     else:
         features["prep_to_destroy_delay_sec"] = ""
         features["n_service_events"] = len(prep_times)
+
+    # ---- ordering between preparation and destruction ----
+    #
+    # This is the part the counts cannot express. Backup software touches
+    # volume shadow copies; so does ransomware. What separates them is not
+    # the act but what follows it, and how soon.
+    #
+    # Recorded here: whether preparation happened at all, whether destruction
+    # followed it, how much preparation preceded the first destroyed file,
+    # and the gap between the two. A tool that deletes shadow copies and then
+    # does nothing scores zero on everything except the count.
+    prep_processes = preparation_process_times(report)
+    features["n_prep_processes"] = len(prep_processes)
+    features["n_prep_categories"] = len({c for _ts, c in prep_processes})
+
+    # What follows preparation has to be destruction, not merely file writing.
+    # Backup and archiving tools touch shadow copies too and then write their
+    # output; measured against writes, they look identical to ransomware.
+    # Deletes and renames are the part they do not do.
+    hard_destroy_times = sorted(ts for ts, et, _ext, _p in lifecycle_events
+                                 if et in DESTRUCTIVE_EVENT_TYPES)
+    destroy_times = hard_destroy_times
+
+    if not prep_processes or not destroy_times:
+        features["prep_to_first_destroy_sec"] = ""
+        features["n_prep_before_destroy"] = "" if not prep_processes else 0
+        features["prep_precedes_destroy"] = ""
+        return features
+
+    first_destroy = min(destroy_times)
+    before = [ts for ts, _c in prep_processes if ts <= first_destroy]
+
+    features["n_prep_before_destroy"] = len(before)
+    features["prep_precedes_destroy"] = int(bool(before))
+    features["prep_to_first_destroy_sec"] = (
+        round((first_destroy - min(before)).total_seconds(), 1) if before else "")
+
+    # How much destruction followed, and over how long. Preparation followed
+    # by two deletions is a different claim from preparation followed by a
+    # thousand, and the ordering alone does not say which happened.
+    features["n_destroy_after_prep"] = sum(1 for ts in destroy_times
+                                            if before and ts >= min(before))
+    features["destroy_span_after_prep_sec"] = (
+        round((max(destroy_times) - first_destroy).total_seconds(), 1)
+        if len(destroy_times) > 1 else 0.0)
 
     return features
 
@@ -692,7 +779,11 @@ PREPARATION_FIELDS = (["n_executed_commands"] +
                        [f"n_{k}" for k in COMMAND_PATTERNS] +
                        ["n_services_created", "n_services_started",
                         "n_service_events", "n_registry_writes",
-                        "n_registry_deletes", "prep_to_destroy_delay_sec"])
+                        "n_registry_deletes", "prep_to_destroy_delay_sec",
+                        "n_prep_processes", "n_prep_categories",
+                        "n_prep_before_destroy", "prep_precedes_destroy",
+                        "prep_to_first_destroy_sec", "n_destroy_after_prep",
+                        "destroy_span_after_prep_sec"])
 
 FEATURE_FIELDNAMES = (IDENTITY_FIELDS + DYNAMIC_FIELDS + STATIC_FIELDS +
                        INTERACTION_FIELDS + PREPARATION_FIELDS)

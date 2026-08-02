@@ -662,7 +662,16 @@ def compute_interaction_features(static_features, dynamic_features):
 
 # ---------------- Feature row assembly ----------------
 
-IDENTITY_FIELDS = ["sample_id", "sha256", "label", "family", "source",
+# `verdict` records what the run actually did, which `label` and `coverage`
+# no longer capture between them. Every sample here is labelled ransomware,
+# and coverage now says only whether the sandbox saw it run -- so without
+# this column a sample that encrypted 140 decoy files and one that installed
+# persistence and quietly gave up are indistinguishable in the feature table.
+#
+# The distinction is the point of several questions the data should answer:
+# what separates the runs that reached encryption from those that stopped
+# short, and whether preparation behaviour means anything on its own.
+IDENTITY_FIELDS = ["sample_id", "sha256", "label", "verdict", "family", "source",
                     "coverage", "static_readable", "malscore", "cape_family"]
 DYNAMIC_FIELDS = [
     "n_file_writes", "n_crypto_calls", "write_crypto_pearson",
@@ -710,8 +719,40 @@ def get_cape_metadata(report):
     }
 
 
+# API calls below which a sample is taken not to have executed. Matches the
+# gate in analyze_result, so the two agree on what "it ran" means.
+MIN_TOTAL_CALLS_FOR_DYNAMIC = 500
+
+
+def report_shows_execution(report):
+    """
+    Whether the sandbox recorded the sample actually running.
+
+    This, and not the verdict, decides whether the dynamic features are real
+    observations. An earlier version gave dynamic features only to runs
+    judged TRUE_ENCRYPTION, which discarded every sample that executed and
+    did not encrypt -- 82 of them in one batch, including a Zeppelin run that
+    spent 669 seconds installing persistence, enumerating drives, probing a
+    network share and deleting its own traces across 10,732 API calls.
+
+    Those runs are the clearest evidence available of what ransomware does
+    before it starts encrypting, and they are precisely the ones a detector
+    would need to act on in time. Writing them out as static-only threw that
+    away.
+
+    The original reasoning still holds for samples that never ran: their
+    n_delete of 0 means "not observed", not "observed to be zero". But a
+    sample that made ten thousand calls and destroyed nothing has been
+    observed to destroy nothing, and that is a fact worth recording.
+    """
+    total = 0
+    for process in report.get("behavior", {}).get("processes", []) or []:
+        total += len(process.get("calls", []) or [])
+    return total >= MIN_TOTAL_CALLS_FOR_DYNAMIC
+
+
 def build_feature_row(report, sample_id, label, family, source, window_sec,
-                       dynamic_ok=True):
+                       dynamic_ok=True, verdict=""):
     """
     Assemble one feature row.
 
@@ -729,6 +770,7 @@ def build_feature_row(report, sample_id, label, family, source, window_sec,
         "sample_id": sample_id,
         "sha256": sha256,
         "label": label,
+        "verdict": verdict,
         "family": family or "",
         "source": source,
         "coverage": "full" if dynamic_ok else "static_only",
@@ -838,7 +880,7 @@ def resolve_report_path(path):
 def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
                  quiet=False, sample_id_override=None,
                  existing_ids=None, existing_shas=None, overwrite=False,
-                 dynamic_ok=True):
+                 dynamic_ok=None, verdict=""):
     report_path = resolve_report_path(path)
     if not report_path:
         if not quiet:
@@ -869,8 +911,11 @@ def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
                   f"use --overwrite to replace)")
         return None
 
+    if dynamic_ok is None:
+        dynamic_ok = report_shows_execution(report)
+
     row = build_feature_row(report, sample_id, label, family, source, window_sec,
-                            dynamic_ok=dynamic_ok)
+                            dynamic_ok=dynamic_ok, verdict=verdict)
 
     # Same binary, different analysis: allowed, but flagged because leaving
     # both rows in can put the same sample in both train and test splits.
@@ -924,10 +969,15 @@ def main():
     parser.add_argument("--sample-id", default=None,
                          help="Override the sample id (defaults to the CAPE task id)")
     parser.add_argument("--static-for-all", action="store_true",
-                         help="Also emit static-only rows for analyses that did not reach "
-                              "--keep-verdict. Their static features are still valid (the "
-                              "import table does not depend on execution), so discarding "
-                              "them wastes most of the dataset.")
+                         help="Process every analysis, not only those reaching "
+                              "--keep-verdict. Static features are valid regardless of "
+                              "execution, and dynamic features are emitted for anything "
+                              "the sandbox actually saw run -- including samples that "
+                              "executed without encrypting, which is where preparation "
+                              "behaviour is visible.")
+    parser.add_argument("--verdict", default="",
+                         help="Verdict to record for a single analysis. In batch mode it "
+                              "is taken from --results instead.")
     parser.add_argument("--overwrite", action="store_true",
                          help="Recompute and replace rows already in the feature table "
                               "(default: skip them, so re-runs are safe)")
@@ -954,8 +1004,9 @@ def main():
                     verdict_by_id[str(r.get("task_id", "")).strip()] = r.get("verdict", "")
             n_pass = sum(1 for v in verdict_by_id.values() if v == args.keep_verdict)
             if args.static_for_all:
-                print(f"{n_pass} analyses reached {args.keep_verdict} (full features); "
-                      f"{len(verdict_by_id) - n_pass} others get static-only rows\n")
+                print(f"Processing every analysis. {n_pass} reached "
+                      f"{args.keep_verdict}; coverage is set per analysis from "
+                      f"whether the sample executed, not from its verdict.\n")
             else:
                 print(f"Restricting to {n_pass} analyses with verdict "
                       f"{args.keep_verdict}\n")
@@ -969,24 +1020,30 @@ def main():
         n_full = n_static = 0
         for d in subdirs:
             verdict = verdict_by_id.get(d.name) if verdict_by_id else args.keep_verdict
-            if verdict == args.keep_verdict:
-                dynamic_ok = True
-            elif args.static_for_all:
-                dynamic_ok = False
-            else:
+            if verdict != args.keep_verdict and not args.static_for_all:
                 continue
+            # Coverage is decided per analysis, from whether the sandbox saw
+            # the sample run -- not from what verdict it was given.
+            dynamic_ok = None
 
-            if process_one(d, args.label, args.source, args.window,
-                           args.features_out, manifest_by_sha,
-                           existing_ids=existing_ids, existing_shas=existing_shas,
-                           overwrite=args.overwrite, dynamic_ok=dynamic_ok):
-                if dynamic_ok:
+            row = process_one(d, args.label, args.source, args.window,
+                              args.features_out, manifest_by_sha,
+                              existing_ids=existing_ids, existing_shas=existing_shas,
+                              overwrite=args.overwrite, dynamic_ok=dynamic_ok,
+                              verdict=verdict or "")
+            if row:
+                if row["coverage"] == "full":
                     n_full += 1
                 else:
                     n_static += 1
 
         processed = n_full + n_static
         print(f"\n[done] {processed} rows written: {n_full} full, {n_static} static-only")
+        if verdict_by_id:
+            enc = sum(1 for d in subdirs
+                      if verdict_by_id.get(d.name) == args.keep_verdict)
+            print(f"        of the full rows, those that reached {args.keep_verdict} "
+                  f"vs ran without it is recorded in the verdict column")
         if args.features_out:
             print(f"[saved] {args.features_out}")
 
@@ -995,7 +1052,7 @@ def main():
                           args.features_out, manifest_by_sha,
                           sample_id_override=args.sample_id,
                           existing_ids=existing_ids, existing_shas=existing_shas,
-                          overwrite=args.overwrite)
+                          overwrite=args.overwrite, verdict=args.verdict)
         if row and args.features_out:
             print(f"[saved] feature row -> {args.features_out}")
     else:

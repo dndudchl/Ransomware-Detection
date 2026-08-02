@@ -56,6 +56,8 @@ from collections import defaultdict
 # Below this many total API calls, the sample effectively did not run.
 MIN_TOTAL_CALLS = 500
 # Below this many destructive file events anywhere, execution is doubtful.
+# Retained for reporting only. It no longer gates the execution check --
+# see stage1_execution_check for why.
 MIN_DESTRUCTIVE_EVENTS = 50
 
 # ---------------- Stage 2 config: did it attack the decoys? ----------------
@@ -385,7 +387,18 @@ def stage1_execution_check(report):
         "file_moves": file_counts.get("move", 0),
     }
 
-    executed = total_calls >= MIN_TOTAL_CALLS and destructive >= MIN_DESTRUCTIVE_EVENTS
+    # Only the call count decides whether the sample executed. The number of
+    # destructive file events used to be part of this test, which conflated
+    # two separate questions: "did this run?" and "did this do damage?".
+    #
+    # The effect was large. Of 229 runs marked FAILED, 70 had executed
+    # substantially -- one made 77,356 API calls -- and were recorded as
+    # having never started, simply because they destroyed few files. That is
+    # what NO_VICTIM_ACTIVITY is for, and it matters: "ran but did not
+    # encrypt" is a finding about the sample, while "never ran" is a finding
+    # about the sandbox. Merging them puts sandbox failures into the
+    # denominator of any trigger rate.
+    executed = total_calls >= MIN_TOTAL_CALLS
     return executed, stats
 
 
@@ -517,8 +530,8 @@ def analyze(report, victim_dirs):
                   f"{note_dirs} director{'ies' if note_dirs != 1 else 'y'}")
     elif not executed:
         verdict = "FAILED"
-        reason = (f"insufficient execution (calls={stats['total_calls']}, "
-                  f"destructive_events={stats['destructive_events']})")
+        reason = (f"did not execute (calls={stats['total_calls']}, "
+                  f"below {MIN_TOTAL_CALLS})")
     elif destroyed > 0:
         verdict = "WEAK_VICTIM_ACTIVITY"
         reason = f"only {destroyed} decoy file(s) destroyed"

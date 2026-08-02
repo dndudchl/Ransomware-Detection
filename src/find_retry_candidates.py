@@ -107,18 +107,36 @@ MANIFEST_FIELDNAMES = [
 
 
 def read_agent_deaths(log_path):
-    """Task ids CAPE reported as having lost their guest agent."""
-    if not os.path.exists(log_path):
-        return set()
+    """
+    Task ids CAPE reported as having lost their guest agent.
+
+    Rotated logs are read too. CAPE's log rotates, so reading only the
+    current file loses every older report -- an earlier run of this tool
+    found a single agent death across the whole dataset because the rest had
+    already been rotated away. Compressed archives are read as well.
+    """
     ids = set()
-    try:
-        with open(log_path, "r", errors="replace") as f:
-            for line in f:
-                m = AGENT_DEAD_RE.search(line)
-                if m:
-                    ids.add(m.group(1))
-    except OSError:
-        pass
+    base = Path(log_path)
+    candidates = [base]
+    if base.parent.is_dir():
+        candidates += sorted(base.parent.glob(base.name + ".*"))
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            if path.suffix == ".gz":
+                import gzip
+                opener = lambda: gzip.open(path, "rt", errors="replace")
+            else:
+                opener = lambda: open(path, "r", errors="replace")
+            with opener() as f:
+                for line in f:
+                    m = AGENT_DEAD_RE.search(line)
+                    if m:
+                        ids.add(m.group(1))
+        except OSError:
+            continue
     return ids
 
 
@@ -169,6 +187,21 @@ def analysis_window(analysis_dir):
         return (min(start, end), end)
     except OSError:
         return (None, None)
+
+
+def analysis_reports_agent_death(analysis_dir):
+    """
+    CAPE also writes a per-analysis cuckoo.log next to the results. That copy
+    does not rotate, so it survives when the central log has moved on.
+    """
+    log = Path(analysis_dir) / "cuckoo.log"
+    if not log.exists():
+        return False
+    try:
+        with open(log, "r", errors="replace") as f:
+            return "agent is dead" in f.read().lower()
+    except OSError:
+        return False
 
 
 def read_analyzer_outcome(analysis_dir):
@@ -299,7 +332,7 @@ def main():
             oom_hit = any(lo <= k <= hi for k in kills)
 
         outcome = read_analyzer_outcome(d)
-        agent_died = d.name in agent_deaths
+        agent_died = d.name in agent_deaths or analysis_reports_agent_death(d)
         decision, reason = classify(outcome, oom_hit, calls, agent_died)
         shots = count_shots(d)
 

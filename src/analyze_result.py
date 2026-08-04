@@ -45,6 +45,8 @@ Usage
 
 import os
 import sys
+import re
+import gzip
 import json
 import csv
 import argparse
@@ -163,7 +165,7 @@ MANIFEST_FIELDNAMES = [
 # ---------------- Report loading ----------------
 
 def resolve_report_path(path):
-    """Accept either an analysis directory or a report.json path."""
+    """Accept an analysis directory, a report.json, or a gzip archive."""
     p = Path(path)
     if p.is_dir():
         candidate = p / "reports" / "report.json"
@@ -175,9 +177,37 @@ def resolve_report_path(path):
     return None
 
 
+def batch_targets(base):
+    """
+    What to process in batch mode: analysis directories if there are any,
+    otherwise archived reports sitting in the directory.
+    """
+    base = Path(base)
+    dirs = sorted((d for d in base.iterdir() if d.is_dir()),
+                   key=lambda d: int(d.name) if d.name.isdigit() else 0)
+    if dirs:
+        return dirs, False
+    archives = sorted(p for p in base.iterdir()
+                      if p.suffix == ".gz" or p.name.endswith(".json"))
+    return archives, True
+
+
 def load_report(report_path):
+    """
+    Read a report from a plain file or a gzip archive.
+
+    The cleanup stage keeps only `task_<id>_report.json.gz`, and the verdict
+    logic has been corrected nine times so far. Without being able to read
+    those archives, every correction would apply only to analyses whose
+    directories still happen to exist -- and would leave data collected on
+    another machine frozen at whatever the logic said when it was first run.
+    """
+    path = Path(report_path)
     try:
-        with open(report_path, "r", errors="replace") as f:
+        if path.suffix == ".gz":
+            with gzip.open(path, "rt", errors="replace") as f:
+                return json.load(f), None
+        with open(path, "r", errors="replace") as f:
             return json.load(f), None
     except (json.JSONDecodeError, OSError) as e:
         return None, str(e)
@@ -591,12 +621,19 @@ def get_task_id(report, fallback_path):
     task_id = info.get("id")
     if task_id:
         return str(task_id)
+    path = Path(fallback_path)
+
     # .../analyses/<id>/reports/report.json
-    parts = Path(fallback_path).parts
+    parts = path.parts
     if "analyses" in parts:
         idx = parts.index("analyses")
         if idx + 1 < len(parts):
             return parts[idx + 1]
+
+    # task_137_report.json.gz, as written by the cleanup stage
+    match = re.search(r"task[_-]?(\d+)", path.name)
+    if match:
+        return match.group(1)
     return ""
 
 
@@ -735,9 +772,14 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
         print(f"[!] not a directory: {analyses_dir}")
         sys.exit(1)
 
-    # analysis dirs are numeric task ids
-    subdirs = sorted((d for d in base.iterdir() if d.is_dir()),
-                     key=lambda d: int(d.name) if d.name.isdigit() else 0)
+    # Analysis directories are numeric task ids. Where the cleanup stage has
+    # already removed them, the archived reports are read instead, so a
+    # corrected verdict can still be applied to work that has been tidied up
+    # or handed over from another machine.
+    subdirs, from_archives = batch_targets(base)
+    if from_archives:
+        print(f"No analysis directories here; reading {len(subdirs)} archived "
+              f"reports instead\n")
 
     results = []
     for d in subdirs:

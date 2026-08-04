@@ -45,6 +45,8 @@ Usage
 
 import os
 import sys
+import re
+import gzip
 import json
 import csv
 import math
@@ -998,26 +1000,71 @@ def resolve_report_path(path):
     return p if p.is_file() else None
 
 
+def open_report(path):
+    """
+    Load a report from whichever shape it is in.
+
+    Three are in circulation. A live analysis directory holds
+    reports/report.json. The cleanup stage keeps only a gzip archive named
+    task_<id>_report.json.gz. And a report may be handed over as a plain
+    file.
+
+    Reading all three matters more than it sounds. The archives exist so that
+    features can be recomputed when their definitions change, which has
+    happened repeatedly -- but until now only live directories could actually
+    be re-read, so the archives were unusable for the purpose they were kept
+    for.
+
+    Returns (report, sample_id) where sample_id is taken from the path when
+    the report itself does not carry an analysis id.
+    """
+    path = Path(path)
+
+    if path.is_dir():
+        candidate = path / "reports" / "report.json"
+        if not candidate.exists():
+            return None, None
+        with open(candidate, "r", errors="replace") as f:
+            return json.load(f), path.name
+
+    if not path.exists():
+        return None, None
+
+    # task_137_report.json.gz -> 137
+    match = re.search(r"task[_-]?(\d+)", path.name)
+    fallback_id = match.group(1) if match else path.stem
+
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", errors="replace") as f:
+            return json.load(f), fallback_id
+
+    with open(path, "r", errors="replace") as f:
+        return json.load(f), fallback_id
+
+
 def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
-                 quiet=False, sample_id_override=None,
+                 quiet=False, sample_id_override=None, id_prefix="",
                  existing_ids=None, existing_shas=None, overwrite=False,
                  dynamic_ok=None, verdict=""):
-    report_path = resolve_report_path(path)
-    if not report_path:
-        if not quiet:
-            print(f"[!] no report.json at {path}")
-        return None
-
     try:
-        with open(report_path, "r", errors="replace") as f:
-            report = json.load(f)
+        report, path_id = open_report(path)
     except (json.JSONDecodeError, OSError) as e:
         if not quiet:
-            print(f"[!] {report_path}: {e}")
+            print(f"[!] {path}: {e}")
+        return None
+    if report is None:
+        if not quiet:
+            print(f"[!] no readable report at {path}")
         return None
 
     info = report.get("info", {}) or {}
-    sample_id = sample_id_override or str(info.get("id", Path(report_path).parent.parent.name))
+    sample_id = sample_id_override or str(info.get("id") or path_id or "")
+    if id_prefix and not sample_id_override:
+        # Task ids restart from 1 on every host, so two machines analysing in
+        # parallel will both produce a task 500. Without a prefix the second
+        # one is silently dropped as a duplicate sample_id and its features
+        # are lost without any warning.
+        sample_id = f"{id_prefix}{sample_id}"
     sha256 = (report.get("target", {}) or {}).get("file", {}).get("sha256", "")
 
     # Enrich with family from the manifest when available.
@@ -1096,6 +1143,11 @@ def main():
                               "the sandbox actually saw run -- including samples that "
                               "executed without encrypting, which is where preparation "
                               "behaviour is visible.")
+    parser.add_argument("--id-prefix", default="",
+                         help="Prepend this to every sample id. Needed when merging "
+                              "results from two hosts, whose task numbering overlaps: "
+                              "without it the second host's rows are dropped as "
+                              "duplicates. For example --id-prefix B gives B500.")
     parser.add_argument("--verdict", default="",
                          help="Verdict to record for a single analysis. In batch mode it "
                               "is taken from --results instead.")
@@ -1134,6 +1186,14 @@ def main():
 
         subdirs = sorted((d for d in base.iterdir() if d.is_dir()),
                           key=lambda d: int(d.name) if d.name.isdigit() else 0)
+        if not subdirs:
+            # A directory of archives rather than of analysis directories.
+            archives = sorted(p for p in base.iterdir()
+                              if p.suffix == ".gz" or p.name.endswith(".json"))
+            if archives:
+                print(f"No analysis directories here; reading {len(archives)} "
+                      f"archived reports instead\n")
+                subdirs = archives
 
         print(f"{'task':<8} {'family':<13} {'coverage':<11} {'features'}")
         print("-" * 100)
@@ -1151,7 +1211,7 @@ def main():
                               args.features_out, manifest_by_sha,
                               existing_ids=existing_ids, existing_shas=existing_shas,
                               overwrite=args.overwrite, dynamic_ok=dynamic_ok,
-                              verdict=verdict or "")
+                              verdict=verdict or "", id_prefix=args.id_prefix)
             if row:
                 if row["coverage"] == "full":
                     n_full += 1
@@ -1173,7 +1233,8 @@ def main():
                           args.features_out, manifest_by_sha,
                           sample_id_override=args.sample_id,
                           existing_ids=existing_ids, existing_shas=existing_shas,
-                          overwrite=args.overwrite, verdict=args.verdict)
+                          overwrite=args.overwrite, verdict=args.verdict,
+                          id_prefix=args.id_prefix)
         if row and args.features_out:
             print(f"[saved] feature row -> {args.features_out}")
     else:

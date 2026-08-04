@@ -92,6 +92,55 @@ def read_extracted_ids(features_csv):
     return ids
 
 
+def remove_analysis_dir(task_dir, analyses_dir):
+    """
+    Delete one analysis directory, falling back to CAPE's own user.
+
+    CAPE creates parts of each analysis (the CAPE/ subdirectory in
+    particular) as the user it runs as, which the account running this
+    pipeline usually cannot remove. A plain rmtree then raises PermissionError
+    partway through -- and, before this was handled, aborted the entire
+    cleanup run, leaving the disk full.
+
+    Falling back to `sudo -u cape rm -rf` works because that user owns the
+    files. The path is checked to be inside the analyses directory first: a
+    recursive delete run as another user is not something to hand an
+    unvalidated path.
+    """
+    task_dir = Path(task_dir).resolve()
+    base = Path(analyses_dir).resolve()
+
+    try:
+        shutil.rmtree(task_dir)
+        return True
+    except PermissionError:
+        pass
+    except OSError as e:
+        print(f"   [!] could not delete {task_dir.name}: {e}")
+        return False
+
+    # Refuse anything that is not a numbered analysis directly under the base.
+    if task_dir.parent != base or not task_dir.name.isdigit():
+        print(f"   [!] refusing to delete {task_dir} as another user: "
+              f"not an analysis directory under {base}")
+        return False
+
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "-u", "cape", "rm", "-rf", str(task_dir)],
+            capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        print(f"   [!] could not delete {task_dir.name}: {e}")
+        return False
+
+    if result.returncode == 0 and not task_dir.exists():
+        return True
+
+    err = (result.stderr or "").strip()
+    print(f"   [!] could not delete {task_dir.name}: {err[:120]}")
+    return False
+
+
 def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
                       keep_verdict, dry_run):
     """
@@ -132,7 +181,7 @@ def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
             for row in csv.DictReader(f):
                 verdict_by_id[str(row.get("task_id", "")).strip()] = row.get("verdict", "")
 
-    archived = deleted = skipped = 0
+    archived = deleted = skipped = failed = 0
 
     for task_dir in sorted(analyses_path.iterdir(), key=lambda d: d.name):
         if not task_dir.is_dir():
@@ -176,11 +225,19 @@ def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
 
         if dry_run:
             print(f"   [dry-run] would delete analysis dir {tid} ({reason})")
+            deleted += 1
+        elif remove_analysis_dir(task_dir, analyses_dir):
+            deleted += 1
         else:
-            shutil.rmtree(task_dir)
-        deleted += 1
+            failed += 1
 
-    print(f"\n[cleanup] archived={archived} deleted={deleted} kept={skipped}")
+    print(f"\n[cleanup] archived={archived} deleted={deleted} kept={skipped}"
+          + (f" failed={failed}" if failed else ""))
+    if failed:
+        print(f"[cleanup] {failed} directories could not be removed. CAPE writes")
+        print(f"          them as its own user, so deleting them needs either")
+        print(f"          NOPASSWD sudo for that user, or a manual pass:")
+        print(f"             sudo rm -rf {analyses_dir}/<id>")
     if dry_run:
         print("[cleanup] dry run -- nothing was actually changed")
 

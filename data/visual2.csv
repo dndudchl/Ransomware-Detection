@@ -1,0 +1,324 @@
+task_id,n_shots,cells_changed,cells_usable,cell_change_fraction,pixel_change_fraction,visual_change,peak_shot,verdict,destroyed_decoy_files,agreement,first_shot,last_shot
+73,5,54,66,0.8182,0.6634,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/73/shots/0001.jpg,/opt/CAPEv2/storage/analyses/73/shots/0005.jpg
+74,35,35,66,0.5303,0.1166,yes,0035.jpg,TRUE_ENCRYPTION,110,agree,/opt/CAPEv2/storage/analyses/74/shots/0001.jpg,/opt/CAPEv2/storage/analyses/74/shots/0035.jpg
+75,35,10,66,0.1515,0.0795,yes,0027.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/75/shots/0001.jpg,/opt/CAPEv2/storage/analyses/75/shots/0035.jpg
+76,105,54,66,0.8182,0.6629,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/76/shots/0001.jpg,/opt/CAPEv2/storage/analyses/76/shots/0105.jpg
+77,28,38,66,0.5758,0.1467,yes,0023.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/77/shots/0001.jpg,/opt/CAPEv2/storage/analyses/77/shots/0028.jpg
+78,14,54,66,0.8182,0.6629,yes,0002.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/78/shots/0001.jpg,/opt/CAPEv2/storage/analyses/78/shots/0014.jpg
+79,27,36,66,0.5455,0.1388,yes,0022.jpg,TRUE_ENCRYPTION,112,agree,/opt/CAPEv2/storage/analyses/79/shots/0001.jpg,/opt/CAPEv2/storage/analyses/79/shots/0027.jpg
+80,52,37,66,0.5606,0.135,yes,0042.jpg,TRUE_ENCRYPTION,101,agree,/opt/CAPEv2/storage/analyses/80/shots/0001.jpg,/opt/CAPEv2/storage/analyses/80/shots/0052.jpg
+81,37,54,66,0.8182,0.6629,yes,0002.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/81/shots/0001.jpg,/opt/CAPEv2/storage/analyses/81/shots/0037.jpg
+82,58,40,66,0.6061,0.1593,yes,0053.jpg,TRUE_ENCRYPTION,97,agree,/opt/CAPEv2/storage/analyses/82/shots/0001.jpg,/opt/CAPEv2/storage/analyses/82/shots/0058.jpg
+83,49,29,66,0.4394,0.0932,yes,0035.jpg,TRUE_ENCRYPTION,106,agree,/opt/CAPEv2/storage/analyses/83/shots/0001.jpg,/opt/CAPEv2/storage/analyses/83/shots/0049.jpg
+84,31,35,66,0.5303,0.1453,yes,0024.jpg,TRUE_ENCRYPTION,105,agree,/opt/CAPEv2/storage/analyses/84/shots/0001.jpg,/opt/CAPEv2/storage/analyses/84/shots/0031.jpg
+85,66,37,66,0.5606,0.1437,yes,0060.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/85/shots/0001.jpg,/opt/CAPEv2/storage/analyses/85/shots/0066.jpg
+86,36,38,66,0.5758,0.1537,yes,0026.jpg,TRUE_ENCRYPTION,106,agree,/opt/CAPEv2/storage/analyses/86/shots/0001.jpg,/opt/CAPEv2/storage/analyses/86/shots/0036.jpg
+87,48,39,66,0.5909,0.135,yes,0030.jpg,TRUE_ENCRYPTION,104,agree,/opt/CAPEv2/storage/analyses/87/shots/0001.jpg,/opt/CAPEv2/storage/analyses/87/shots/0048.jpg
+88,69,43,66,0.6515,0.1735,yes,0063.jpg,TRUE_ENCRYPTION,100,agree,/opt/CAPEv2/storage/analyses/88/shots/0001.jpg,/opt/CAPEv2/storage/analyses/88/shots/0069.jpg
+89,63,38,66,0.5758,0.1695,yes,0048.jpg,TRUE_ENCRYPTION,102,agree,/opt/CAPEv2/storage/analyses/89/shots/0001.jpg,/opt/CAPEv2/storage/analyses/89/shots/0063.jpg
+90,27,34,66,0.5152,0.1196,yes,0022.jpg,TRUE_ENCRYPTION,103,agree,/opt/CAPEv2/storage/analyses/90/shots/0001.jpg,/opt/CAPEv2/storage/analyses/90/shots/0027.jpg
+91,42,38,66,0.5758,0.1458,yes,0036.jpg,TRUE_ENCRYPTION,98,agree,/opt/CAPEv2/storage/analyses/91/shots/0001.jpg,/opt/CAPEv2/storage/analyses/91/shots/0042.jpg
+92,55,32,66,0.4848,0.1128,yes,0050.jpg,TRUE_ENCRYPTION,112,agree,/opt/CAPEv2/storage/analyses/92/shots/0001.jpg,/opt/CAPEv2/storage/analyses/92/shots/0055.jpg
+93,41,31,66,0.4697,0.09,yes,0041.jpg,TRUE_ENCRYPTION,96,agree,/opt/CAPEv2/storage/analyses/93/shots/0001.jpg,/opt/CAPEv2/storage/analyses/93/shots/0041.jpg
+94,43,33,66,0.5,0.1115,yes,0029.jpg,TRUE_ENCRYPTION,97,agree,/opt/CAPEv2/storage/analyses/94/shots/0001.jpg,/opt/CAPEv2/storage/analyses/94/shots/0043.jpg
+95,57,42,66,0.6364,0.1659,yes,0038.jpg,TRUE_ENCRYPTION,107,agree,/opt/CAPEv2/storage/analyses/95/shots/0001.jpg,/opt/CAPEv2/storage/analyses/95/shots/0057.jpg
+96,86,41,66,0.6212,0.1765,yes,0078.jpg,TRUE_ENCRYPTION,99,agree,/opt/CAPEv2/storage/analyses/96/shots/0001.jpg,/opt/CAPEv2/storage/analyses/96/shots/0086.jpg
+97,57,36,66,0.5455,0.1539,yes,0052.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/97/shots/0001.jpg,/opt/CAPEv2/storage/analyses/97/shots/0057.jpg
+98,43,49,66,0.7424,0.2169,yes,0016.jpg,TRUE_ENCRYPTION,96,agree,/opt/CAPEv2/storage/analyses/98/shots/0001.jpg,/opt/CAPEv2/storage/analyses/98/shots/0043.jpg
+99,4,4,66,0.0606,0.037,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/99/shots/0001.jpg,/opt/CAPEv2/storage/analyses/99/shots/0004.jpg
+100,4,8,66,0.1212,0.0423,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/100/shots/0001.jpg,/opt/CAPEv2/storage/analyses/100/shots/0004.jpg
+101,2,4,66,0.0606,0.0381,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/101/shots/0001.jpg,/opt/CAPEv2/storage/analyses/101/shots/0002.jpg
+102,38,42,66,0.6364,0.1618,yes,0029.jpg,TRUE_ENCRYPTION,97,agree,/opt/CAPEv2/storage/analyses/102/shots/0001.jpg,/opt/CAPEv2/storage/analyses/102/shots/0038.jpg
+103,37,37,66,0.5606,0.1691,yes,0021.jpg,TRUE_ENCRYPTION,101,agree,/opt/CAPEv2/storage/analyses/103/shots/0001.jpg,/opt/CAPEv2/storage/analyses/103/shots/0037.jpg
+104,34,33,66,0.5,0.107,yes,0031.jpg,TRUE_ENCRYPTION,102,agree,/opt/CAPEv2/storage/analyses/104/shots/0001.jpg,/opt/CAPEv2/storage/analyses/104/shots/0034.jpg
+105,49,66,66,1.0,0.9961,yes,0016.jpg,TRUE_ENCRYPTION,108,agree,/opt/CAPEv2/storage/analyses/105/shots/0001.jpg,/opt/CAPEv2/storage/analyses/105/shots/0049.jpg
+106,43,47,66,0.7121,0.1805,yes,0018.jpg,TRUE_ENCRYPTION,123,agree,/opt/CAPEv2/storage/analyses/106/shots/0001.jpg,/opt/CAPEv2/storage/analyses/106/shots/0043.jpg
+107,27,54,66,0.8182,0.6629,yes,0003.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/107/shots/0001.jpg,/opt/CAPEv2/storage/analyses/107/shots/0027.jpg
+108,91,42,66,0.6364,0.1849,yes,0091.jpg,TRUE_ENCRYPTION,107,agree,/opt/CAPEv2/storage/analyses/108/shots/0001.jpg,/opt/CAPEv2/storage/analyses/108/shots/0091.jpg
+109,44,43,66,0.6515,0.1323,yes,0040.jpg,TRUE_ENCRYPTION,106,agree,/opt/CAPEv2/storage/analyses/109/shots/0001.jpg,/opt/CAPEv2/storage/analyses/109/shots/0044.jpg
+110,43,43,66,0.6515,0.1818,yes,0035.jpg,TRUE_ENCRYPTION,102,agree,/opt/CAPEv2/storage/analyses/110/shots/0001.jpg,/opt/CAPEv2/storage/analyses/110/shots/0043.jpg
+111,31,40,66,0.6061,0.1561,yes,0026.jpg,TRUE_ENCRYPTION,100,agree,/opt/CAPEv2/storage/analyses/111/shots/0001.jpg,/opt/CAPEv2/storage/analyses/111/shots/0031.jpg
+112,60,40,66,0.6061,0.1724,yes,0046.jpg,TRUE_ENCRYPTION,107,agree,/opt/CAPEv2/storage/analyses/112/shots/0001.jpg,/opt/CAPEv2/storage/analyses/112/shots/0060.jpg
+113,41,41,66,0.6212,0.1638,yes,0032.jpg,TRUE_ENCRYPTION,105,agree,/opt/CAPEv2/storage/analyses/113/shots/0001.jpg,/opt/CAPEv2/storage/analyses/113/shots/0041.jpg
+114,26,35,66,0.5303,0.1177,yes,0026.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/114/shots/0001.jpg,/opt/CAPEv2/storage/analyses/114/shots/0026.jpg
+115,50,42,66,0.6364,0.1873,yes,0038.jpg,TRUE_ENCRYPTION,110,agree,/opt/CAPEv2/storage/analyses/115/shots/0001.jpg,/opt/CAPEv2/storage/analyses/115/shots/0050.jpg
+116,31,35,66,0.5303,0.154,yes,0023.jpg,TRUE_ENCRYPTION,105,agree,/opt/CAPEv2/storage/analyses/116/shots/0001.jpg,/opt/CAPEv2/storage/analyses/116/shots/0031.jpg
+117,58,66,66,1.0,0.9961,yes,0033.jpg,TRUE_ENCRYPTION,100,agree,/opt/CAPEv2/storage/analyses/117/shots/0001.jpg,/opt/CAPEv2/storage/analyses/117/shots/0058.jpg
+118,50,39,66,0.5909,0.1712,yes,0041.jpg,TRUE_ENCRYPTION,102,agree,/opt/CAPEv2/storage/analyses/118/shots/0001.jpg,/opt/CAPEv2/storage/analyses/118/shots/0050.jpg
+119,71,47,66,0.7121,0.162,yes,0061.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/119/shots/0001.jpg,/opt/CAPEv2/storage/analyses/119/shots/0071.jpg
+120,43,36,66,0.5455,0.1482,yes,0031.jpg,TRUE_ENCRYPTION,109,agree,/opt/CAPEv2/storage/analyses/120/shots/0001.jpg,/opt/CAPEv2/storage/analyses/120/shots/0043.jpg
+121,60,40,66,0.6061,0.175,yes,0052.jpg,TRUE_ENCRYPTION,106,agree,/opt/CAPEv2/storage/analyses/121/shots/0001.jpg,/opt/CAPEv2/storage/analyses/121/shots/0060.jpg
+122,47,35,66,0.5303,0.1527,yes,0043.jpg,TRUE_ENCRYPTION,109,agree,/opt/CAPEv2/storage/analyses/122/shots/0001.jpg,/opt/CAPEv2/storage/analyses/122/shots/0047.jpg
+123,53,13,66,0.197,0.0708,yes,0020.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/123/shots/0001.jpg,/opt/CAPEv2/storage/analyses/123/shots/0053.jpg
+124,62,44,66,0.6667,0.1758,yes,0044.jpg,TRUE_ENCRYPTION,116,agree,/opt/CAPEv2/storage/analyses/124/shots/0001.jpg,/opt/CAPEv2/storage/analyses/124/shots/0062.jpg
+125,46,11,66,0.1667,0.0724,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/125/shots/0001.jpg,/opt/CAPEv2/storage/analyses/125/shots/0046.jpg
+126,34,28,66,0.4242,0.0871,yes,0021.jpg,TRUE_ENCRYPTION,2,agree,/opt/CAPEv2/storage/analyses/126/shots/0001.jpg,/opt/CAPEv2/storage/analyses/126/shots/0034.jpg
+127,67,17,66,0.2576,0.0981,yes,0051.jpg,TRUE_ENCRYPTION,2,agree,/opt/CAPEv2/storage/analyses/127/shots/0001.jpg,/opt/CAPEv2/storage/analyses/127/shots/0067.jpg
+128,41,17,66,0.2576,0.0729,yes,0024.jpg,TRUE_ENCRYPTION,2,agree,/opt/CAPEv2/storage/analyses/128/shots/0001.jpg,/opt/CAPEv2/storage/analyses/128/shots/0041.jpg
+129,45,38,66,0.5758,0.1187,yes,0041.jpg,TRUE_ENCRYPTION,109,agree,/opt/CAPEv2/storage/analyses/129/shots/0001.jpg,/opt/CAPEv2/storage/analyses/129/shots/0045.jpg
+130,51,36,66,0.5455,0.1218,yes,0037.jpg,TRUE_ENCRYPTION,110,agree,/opt/CAPEv2/storage/analyses/130/shots/0001.jpg,/opt/CAPEv2/storage/analyses/130/shots/0051.jpg
+131,60,37,66,0.5606,0.1511,yes,0040.jpg,TRUE_ENCRYPTION,112,agree,/opt/CAPEv2/storage/analyses/131/shots/0001.jpg,/opt/CAPEv2/storage/analyses/131/shots/0060.jpg
+132,39,44,66,0.6667,0.1418,yes,0034.jpg,TRUE_ENCRYPTION,110,agree,/opt/CAPEv2/storage/analyses/132/shots/0001.jpg,/opt/CAPEv2/storage/analyses/132/shots/0039.jpg
+133,40,34,66,0.5152,0.1115,yes,0025.jpg,TRUE_ENCRYPTION,104,agree,/opt/CAPEv2/storage/analyses/133/shots/0001.jpg,/opt/CAPEv2/storage/analyses/133/shots/0040.jpg
+134,34,42,66,0.6364,0.1481,yes,0021.jpg,TRUE_ENCRYPTION,104,agree,/opt/CAPEv2/storage/analyses/134/shots/0001.jpg,/opt/CAPEv2/storage/analyses/134/shots/0034.jpg
+135,6,8,66,0.1212,0.0455,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/135/shots/0001.jpg,/opt/CAPEv2/storage/analyses/135/shots/0006.jpg
+136,36,32,66,0.4848,0.1002,yes,0030.jpg,TRUE_ENCRYPTION,105,agree,/opt/CAPEv2/storage/analyses/136/shots/0001.jpg,/opt/CAPEv2/storage/analyses/136/shots/0036.jpg
+137,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/137/shots/0001.jpg,
+138,34,16,66,0.2424,0.076,yes,0010.jpg,TRUE_ENCRYPTION,1,agree,/opt/CAPEv2/storage/analyses/138/shots/0001.jpg,/opt/CAPEv2/storage/analyses/138/shots/0034.jpg
+139,48,43,66,0.6515,0.1665,yes,0039.jpg,TRUE_ENCRYPTION,1,agree,/opt/CAPEv2/storage/analyses/139/shots/0001.jpg,/opt/CAPEv2/storage/analyses/139/shots/0048.jpg
+140,48,38,66,0.5758,0.1684,yes,0044.jpg,TRUE_ENCRYPTION,99,agree,/opt/CAPEv2/storage/analyses/140/shots/0001.jpg,/opt/CAPEv2/storage/analyses/140/shots/0048.jpg
+141,28,66,66,1.0,0.9961,yes,0018.jpg,TRUE_ENCRYPTION,1,agree,/opt/CAPEv2/storage/analyses/141/shots/0001.jpg,/opt/CAPEv2/storage/analyses/141/shots/0028.jpg
+142,39,34,66,0.5152,0.1386,yes,0036.jpg,TRUE_ENCRYPTION,101,agree,/opt/CAPEv2/storage/analyses/142/shots/0001.jpg,/opt/CAPEv2/storage/analyses/142/shots/0039.jpg
+143,41,33,66,0.5,0.1116,yes,0032.jpg,TRUE_ENCRYPTION,105,agree,/opt/CAPEv2/storage/analyses/143/shots/0001.jpg,/opt/CAPEv2/storage/analyses/143/shots/0041.jpg
+144,43,30,66,0.4545,0.092,yes,0043.jpg,TRUE_ENCRYPTION,116,agree,/opt/CAPEv2/storage/analyses/144/shots/0001.jpg,/opt/CAPEv2/storage/analyses/144/shots/0043.jpg
+145,52,35,66,0.5303,0.1041,yes,0042.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/145/shots/0001.jpg,/opt/CAPEv2/storage/analyses/145/shots/0052.jpg
+146,60,36,66,0.5455,0.1566,yes,0046.jpg,TRUE_ENCRYPTION,104,agree,/opt/CAPEv2/storage/analyses/146/shots/0001.jpg,/opt/CAPEv2/storage/analyses/146/shots/0060.jpg
+147,9,8,66,0.1212,0.0454,yes,0008.jpg,TRUE_ENCRYPTION,14,agree,/opt/CAPEv2/storage/analyses/147/shots/0001.jpg,/opt/CAPEv2/storage/analyses/147/shots/0009.jpg
+148,23,10,66,0.1515,0.0542,yes,0006.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/148/shots/0001.jpg,/opt/CAPEv2/storage/analyses/148/shots/0023.jpg
+149,28,22,66,0.3333,0.1804,yes,0003.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/149/shots/0001.jpg,/opt/CAPEv2/storage/analyses/149/shots/0028.jpg
+150,45,22,66,0.3333,0.1969,yes,0008.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/150/shots/0001.jpg,/opt/CAPEv2/storage/analyses/150/shots/0045.jpg
+151,3,10,66,0.1515,0.035,yes,0003.jpg,TRUE_ENCRYPTION,5,agree,/opt/CAPEv2/storage/analyses/151/shots/0001.jpg,/opt/CAPEv2/storage/analyses/151/shots/0003.jpg
+152,52,33,66,0.5,0.1455,yes,0047.jpg,TRUE_ENCRYPTION,83,agree,/opt/CAPEv2/storage/analyses/152/shots/0001.jpg,/opt/CAPEv2/storage/analyses/152/shots/0052.jpg
+153,0,,,,,unknown,,FAILED,0,,,
+154,30,25,66,0.3788,0.2182,yes,0010.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/154/shots/0001.jpg,/opt/CAPEv2/storage/analyses/154/shots/0030.jpg
+155,40,24,66,0.3636,0.2006,yes,0015.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/155/shots/0001.jpg,/opt/CAPEv2/storage/analyses/155/shots/0040.jpg
+156,47,16,66,0.2424,0.0719,yes,0025.jpg,TRUE_ENCRYPTION,11,agree,/opt/CAPEv2/storage/analyses/156/shots/0001.jpg,/opt/CAPEv2/storage/analyses/156/shots/0047.jpg
+157,59,42,66,0.6364,0.1481,yes,0033.jpg,TRUE_ENCRYPTION,52,agree,/opt/CAPEv2/storage/analyses/157/shots/0001.jpg,/opt/CAPEv2/storage/analyses/157/shots/0059.jpg
+158,39,42,66,0.6364,0.1454,yes,0024.jpg,TRUE_ENCRYPTION,44,agree,/opt/CAPEv2/storage/analyses/158/shots/0001.jpg,/opt/CAPEv2/storage/analyses/158/shots/0039.jpg
+201,41,14,66,0.2121,0.0957,yes,0014.jpg,TRUE_ENCRYPTION,26,agree,/opt/CAPEv2/storage/analyses/201/shots/0001.jpg,/opt/CAPEv2/storage/analyses/201/shots/0041.jpg
+202,62,41,66,0.6212,0.1609,yes,0029.jpg,TRUE_ENCRYPTION,83,agree,/opt/CAPEv2/storage/analyses/202/shots/0001.jpg,/opt/CAPEv2/storage/analyses/202/shots/0062.jpg
+203,57,35,66,0.5303,0.1561,yes,0024.jpg,TRUE_ENCRYPTION,96,agree,/opt/CAPEv2/storage/analyses/203/shots/0001.jpg,/opt/CAPEv2/storage/analyses/203/shots/0057.jpg
+204,31,21,66,0.3182,0.1998,yes,0015.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/204/shots/0001.jpg,/opt/CAPEv2/storage/analyses/204/shots/0031.jpg
+205,43,10,66,0.1515,0.0546,yes,0004.jpg,TRUE_ENCRYPTION,50,agree,/opt/CAPEv2/storage/analyses/205/shots/0001.jpg,/opt/CAPEv2/storage/analyses/205/shots/0043.jpg
+206,12,17,66,0.2576,0.1766,yes,0009.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/206/shots/0001.jpg,/opt/CAPEv2/storage/analyses/206/shots/0012.jpg
+207,32,40,66,0.6061,0.1531,yes,0019.jpg,TRUE_ENCRYPTION,50,agree,/opt/CAPEv2/storage/analyses/207/shots/0001.jpg,/opt/CAPEv2/storage/analyses/207/shots/0032.jpg
+208,33,20,66,0.303,0.2007,yes,0005.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/208/shots/0001.jpg,/opt/CAPEv2/storage/analyses/208/shots/0033.jpg
+209,40,22,66,0.3333,0.1074,yes,0037.jpg,WEAK_VICTIM_ACTIVITY,1,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/209/shots/0001.jpg,/opt/CAPEv2/storage/analyses/209/shots/0040.jpg
+210,36,42,66,0.6364,0.1996,yes,0021.jpg,TRUE_ENCRYPTION,44,agree,/opt/CAPEv2/storage/analyses/210/shots/0001.jpg,/opt/CAPEv2/storage/analyses/210/shots/0036.jpg
+211,29,43,66,0.6515,0.1454,yes,0016.jpg,WEAK_VICTIM_ACTIVITY,1,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/211/shots/0001.jpg,/opt/CAPEv2/storage/analyses/211/shots/0029.jpg
+212,37,22,66,0.3333,0.1951,yes,0027.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/212/shots/0001.jpg,/opt/CAPEv2/storage/analyses/212/shots/0037.jpg
+213,5,16,66,0.2424,0.1544,yes,0005.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/213/shots/0001.jpg,/opt/CAPEv2/storage/analyses/213/shots/0005.jpg
+214,34,21,66,0.3182,0.1999,yes,0008.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/214/shots/0001.jpg,/opt/CAPEv2/storage/analyses/214/shots/0034.jpg
+215,51,49,66,0.7424,0.2167,yes,0022.jpg,TRUE_ENCRYPTION,7,agree,/opt/CAPEv2/storage/analyses/215/shots/0001.jpg,/opt/CAPEv2/storage/analyses/215/shots/0051.jpg
+216,61,43,66,0.6515,0.167,yes,0061.jpg,TRUE_ENCRYPTION,50,agree,/opt/CAPEv2/storage/analyses/216/shots/0001.jpg,/opt/CAPEv2/storage/analyses/216/shots/0061.jpg
+217,51,37,66,0.5606,0.1423,yes,0047.jpg,TRUE_ENCRYPTION,53,agree,/opt/CAPEv2/storage/analyses/217/shots/0001.jpg,/opt/CAPEv2/storage/analyses/217/shots/0051.jpg
+218,47,22,66,0.3333,0.1444,yes,0034.jpg,TRUE_ENCRYPTION,43,agree,/opt/CAPEv2/storage/analyses/218/shots/0001.jpg,/opt/CAPEv2/storage/analyses/218/shots/0047.jpg
+219,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/219/shots/0001.jpg,
+220,41,11,66,0.1667,0.0524,yes,0036.jpg,TRUE_ENCRYPTION,48,agree,/opt/CAPEv2/storage/analyses/220/shots/0001.jpg,/opt/CAPEv2/storage/analyses/220/shots/0041.jpg
+221,45,34,66,0.5152,0.1308,yes,0026.jpg,TRUE_ENCRYPTION,131,agree,/opt/CAPEv2/storage/analyses/221/shots/0001.jpg,/opt/CAPEv2/storage/analyses/221/shots/0045.jpg
+222,19,18,66,0.2727,0.101,yes,0015.jpg,TRUE_ENCRYPTION,8,agree,/opt/CAPEv2/storage/analyses/222/shots/0001.jpg,/opt/CAPEv2/storage/analyses/222/shots/0019.jpg
+223,44,17,66,0.2576,0.0978,yes,0040.jpg,TRUE_ENCRYPTION,36,agree,/opt/CAPEv2/storage/analyses/223/shots/0001.jpg,/opt/CAPEv2/storage/analyses/223/shots/0044.jpg
+224,0,,,,,unknown,,FAILED,0,,,
+225,3,8,66,0.1212,0.0637,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/225/shots/0001.jpg,/opt/CAPEv2/storage/analyses/225/shots/0003.jpg
+226,48,36,66,0.5455,0.1446,yes,0034.jpg,TRUE_ENCRYPTION,100,agree,/opt/CAPEv2/storage/analyses/226/shots/0001.jpg,/opt/CAPEv2/storage/analyses/226/shots/0048.jpg
+227,43,9,66,0.1364,0.0615,yes,0035.jpg,TRUE_ENCRYPTION,6,agree,/opt/CAPEv2/storage/analyses/227/shots/0001.jpg,/opt/CAPEv2/storage/analyses/227/shots/0043.jpg
+243,18,58,66,0.8788,0.6861,yes,0010.jpg,TRUE_ENCRYPTION,13,agree,/opt/CAPEv2/storage/analyses/243/shots/0001.jpg,/opt/CAPEv2/storage/analyses/243/shots/0018.jpg
+244,7,9,66,0.1364,0.0664,yes,0006.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/244/shots/0001.jpg,/opt/CAPEv2/storage/analyses/244/shots/0007.jpg
+245,3,6,66,0.0909,0.0434,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/245/shots/0001.jpg,/opt/CAPEv2/storage/analyses/245/shots/0003.jpg
+246,22,31,66,0.4697,0.1043,yes,0020.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/246/shots/0001.jpg,/opt/CAPEv2/storage/analyses/246/shots/0022.jpg
+247,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/247/shots/0001.jpg,
+248,0,,,,,unknown,,FAILED,0,,,
+249,0,,,,,unknown,,FAILED,0,,,
+250,9,56,66,0.8485,0.6679,yes,0005.jpg,TRUE_ENCRYPTION,10,agree,/opt/CAPEv2/storage/analyses/250/shots/0001.jpg,/opt/CAPEv2/storage/analyses/250/shots/0009.jpg
+251,4,9,66,0.1364,0.0804,yes,0003.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/251/shots/0001.jpg,/opt/CAPEv2/storage/analyses/251/shots/0004.jpg
+252,28,9,66,0.1364,0.06,yes,0007.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/252/shots/0001.jpg,/opt/CAPEv2/storage/analyses/252/shots/0028.jpg
+253,54,66,66,1.0,0.9241,yes,0041.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/253/shots/0001.jpg,/opt/CAPEv2/storage/analyses/253/shots/0054.jpg
+254,10,14,66,0.2121,0.0481,yes,0010.jpg,TRUE_ENCRYPTION,12,agree,/opt/CAPEv2/storage/analyses/254/shots/0001.jpg,/opt/CAPEv2/storage/analyses/254/shots/0010.jpg
+255,20,59,66,0.8939,0.6906,yes,0011.jpg,TRUE_ENCRYPTION,108,agree,/opt/CAPEv2/storage/analyses/255/shots/0001.jpg,/opt/CAPEv2/storage/analyses/255/shots/0020.jpg
+256,10,4,66,0.0606,0.0165,no,0010.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/256/shots/0001.jpg,/opt/CAPEv2/storage/analyses/256/shots/0010.jpg
+257,17,55,66,0.8333,0.6743,yes,0016.jpg,TRUE_ENCRYPTION,7,agree,/opt/CAPEv2/storage/analyses/257/shots/0001.jpg,/opt/CAPEv2/storage/analyses/257/shots/0017.jpg
+258,3,17,66,0.2576,0.0886,yes,0003.jpg,TRUE_ENCRYPTION,21,agree,/opt/CAPEv2/storage/analyses/258/shots/0001.jpg,/opt/CAPEv2/storage/analyses/258/shots/0003.jpg
+259,33,10,66,0.1515,0.0618,yes,0010.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/259/shots/0001.jpg,/opt/CAPEv2/storage/analyses/259/shots/0033.jpg
+260,40,66,66,1.0,0.8493,yes,0007.jpg,TRUE_ENCRYPTION,140,agree,/opt/CAPEv2/storage/analyses/260/shots/0001.jpg,/opt/CAPEv2/storage/analyses/260/shots/0040.jpg
+261,44,35,66,0.5303,0.1478,yes,0014.jpg,TRUE_ENCRYPTION,56,agree,/opt/CAPEv2/storage/analyses/261/shots/0001.jpg,/opt/CAPEv2/storage/analyses/261/shots/0044.jpg
+262,23,60,66,0.9091,0.6946,yes,0004.jpg,TRUE_ENCRYPTION,124,agree,/opt/CAPEv2/storage/analyses/262/shots/0001.jpg,/opt/CAPEv2/storage/analyses/262/shots/0023.jpg
+263,31,10,66,0.1515,0.0566,yes,0008.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/263/shots/0001.jpg,/opt/CAPEv2/storage/analyses/263/shots/0031.jpg
+264,0,,,,,unknown,,,,,,
+265,3,54,66,0.8182,0.6634,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/265/shots/0001.jpg,/opt/CAPEv2/storage/analyses/265/shots/0003.jpg
+266,16,14,66,0.2121,0.0719,yes,0007.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/266/shots/0001.jpg,/opt/CAPEv2/storage/analyses/266/shots/0016.jpg
+267,44,66,66,1.0,0.9194,yes,0025.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/267/shots/0001.jpg,/opt/CAPEv2/storage/analyses/267/shots/0044.jpg
+268,63,19,66,0.2879,0.102,yes,0033.jpg,TRUE_ENCRYPTION,33,agree,/opt/CAPEv2/storage/analyses/268/shots/0001.jpg,/opt/CAPEv2/storage/analyses/268/shots/0063.jpg
+269,37,13,66,0.197,0.0752,yes,0012.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/269/shots/0001.jpg,/opt/CAPEv2/storage/analyses/269/shots/0037.jpg
+270,20,58,66,0.8788,0.683,yes,0014.jpg,TRUE_ENCRYPTION,26,agree,/opt/CAPEv2/storage/analyses/270/shots/0001.jpg,/opt/CAPEv2/storage/analyses/270/shots/0020.jpg
+271,41,12,66,0.1818,0.0709,yes,0010.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/271/shots/0001.jpg,/opt/CAPEv2/storage/analyses/271/shots/0041.jpg
+272,30,16,66,0.2424,0.0941,yes,0012.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/272/shots/0001.jpg,/opt/CAPEv2/storage/analyses/272/shots/0030.jpg
+273,57,66,66,1.0,0.8485,yes,0002.jpg,TRUE_ENCRYPTION,131,agree,/opt/CAPEv2/storage/analyses/273/shots/0001.jpg,/opt/CAPEv2/storage/analyses/273/shots/0057.jpg
+274,55,37,66,0.5606,0.1554,yes,0037.jpg,TRUE_ENCRYPTION,10,agree,/opt/CAPEv2/storage/analyses/274/shots/0001.jpg,/opt/CAPEv2/storage/analyses/274/shots/0055.jpg
+275,56,60,66,0.9091,0.6877,yes,0013.jpg,TRUE_ENCRYPTION,29,agree,/opt/CAPEv2/storage/analyses/275/shots/0001.jpg,/opt/CAPEv2/storage/analyses/275/shots/0056.jpg
+276,3,0,66,0.0,0.0011,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/276/shots/0001.jpg,/opt/CAPEv2/storage/analyses/276/shots/0003.jpg
+277,47,66,66,1.0,0.9231,yes,0018.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/277/shots/0001.jpg,/opt/CAPEv2/storage/analyses/277/shots/0047.jpg
+278,4,12,66,0.1818,0.1333,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/278/shots/0001.jpg,/opt/CAPEv2/storage/analyses/278/shots/0004.jpg
+279,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/279/shots/0001.jpg,
+280,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/280/shots/0001.jpg,
+281,52,66,66,1.0,0.9248,yes,0022.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/281/shots/0001.jpg,/opt/CAPEv2/storage/analyses/281/shots/0052.jpg
+282,40,35,66,0.5303,0.164,yes,0023.jpg,TRUE_ENCRYPTION,76,agree,/opt/CAPEv2/storage/analyses/282/shots/0001.jpg,/opt/CAPEv2/storage/analyses/282/shots/0040.jpg
+283,36,60,66,0.9091,0.6879,yes,0009.jpg,TRUE_ENCRYPTION,1,agree,/opt/CAPEv2/storage/analyses/283/shots/0001.jpg,/opt/CAPEv2/storage/analyses/283/shots/0036.jpg
+284,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/284/shots/0001.jpg,
+285,64,66,66,1.0,0.8996,yes,0020.jpg,TRUE_ENCRYPTION,140,agree,/opt/CAPEv2/storage/analyses/285/shots/0001.jpg,/opt/CAPEv2/storage/analyses/285/shots/0064.jpg
+286,57,21,66,0.3182,0.0675,yes,0057.jpg,TRUE_ENCRYPTION,31,agree,/opt/CAPEv2/storage/analyses/286/shots/0001.jpg,/opt/CAPEv2/storage/analyses/286/shots/0057.jpg
+287,8,60,66,0.9091,0.6899,yes,0006.jpg,TRUE_ENCRYPTION,10,agree,/opt/CAPEv2/storage/analyses/287/shots/0001.jpg,/opt/CAPEv2/storage/analyses/287/shots/0008.jpg
+288,52,66,66,1.0,0.9056,yes,0035.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/288/shots/0001.jpg,/opt/CAPEv2/storage/analyses/288/shots/0052.jpg
+289,0,,,,,unknown,,FAILED,0,,,
+290,36,58,66,0.8788,0.6881,yes,0007.jpg,TRUE_ENCRYPTION,4,agree,/opt/CAPEv2/storage/analyses/290/shots/0001.jpg,/opt/CAPEv2/storage/analyses/290/shots/0036.jpg
+291,46,66,66,1.0,0.8485,yes,0004.jpg,TRUE_ENCRYPTION,140,agree,/opt/CAPEv2/storage/analyses/291/shots/0001.jpg,/opt/CAPEv2/storage/analyses/291/shots/0046.jpg
+292,17,10,66,0.1515,0.0635,yes,0004.jpg,TRUE_ENCRYPTION,56,agree,/opt/CAPEv2/storage/analyses/292/shots/0001.jpg,/opt/CAPEv2/storage/analyses/292/shots/0017.jpg
+293,11,60,66,0.9091,0.6899,yes,0007.jpg,TRUE_ENCRYPTION,11,agree,/opt/CAPEv2/storage/analyses/293/shots/0001.jpg,/opt/CAPEv2/storage/analyses/293/shots/0011.jpg
+294,49,8,66,0.1212,0.053,yes,0026.jpg,TRUE_ENCRYPTION,12,agree,/opt/CAPEv2/storage/analyses/294/shots/0001.jpg,/opt/CAPEv2/storage/analyses/294/shots/0049.jpg
+295,50,58,66,0.8788,0.6829,yes,0043.jpg,TRUE_ENCRYPTION,33,agree,/opt/CAPEv2/storage/analyses/295/shots/0001.jpg,/opt/CAPEv2/storage/analyses/295/shots/0050.jpg
+296,35,42,66,0.6364,0.161,yes,0030.jpg,TRUE_ENCRYPTION,57,agree,/opt/CAPEv2/storage/analyses/296/shots/0001.jpg,/opt/CAPEv2/storage/analyses/296/shots/0035.jpg
+297,46,58,66,0.8788,0.6828,yes,0038.jpg,TRUE_ENCRYPTION,42,agree,/opt/CAPEv2/storage/analyses/297/shots/0001.jpg,/opt/CAPEv2/storage/analyses/297/shots/0046.jpg
+298,15,41,66,0.6212,0.1608,yes,0006.jpg,TRUE_ENCRYPTION,6,agree,/opt/CAPEv2/storage/analyses/298/shots/0001.jpg,/opt/CAPEv2/storage/analyses/298/shots/0015.jpg
+299,24,41,66,0.6212,0.1571,yes,0005.jpg,TRUE_ENCRYPTION,52,agree,/opt/CAPEv2/storage/analyses/299/shots/0001.jpg,/opt/CAPEv2/storage/analyses/299/shots/0024.jpg
+300,56,43,66,0.6515,0.1846,yes,0051.jpg,TRUE_ENCRYPTION,82,agree,/opt/CAPEv2/storage/analyses/300/shots/0001.jpg,/opt/CAPEv2/storage/analyses/300/shots/0056.jpg
+301,0,,,,,unknown,,FAILED,0,,,
+302,0,,,,,unknown,,,,,,
+303,12,54,66,0.8182,0.6629,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/303/shots/0001.jpg,/opt/CAPEv2/storage/analyses/303/shots/0012.jpg
+304,9,54,66,0.8182,0.6359,yes,0002.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/304/shots/0001.jpg,/opt/CAPEv2/storage/analyses/304/shots/0009.jpg
+305,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/305/shots/0001.jpg,
+306,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/306/shots/0001.jpg,
+307,2,3,66,0.0455,0.0127,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/307/shots/0001.jpg,/opt/CAPEv2/storage/analyses/307/shots/0002.jpg
+308,7,54,66,0.8182,0.6602,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/308/shots/0001.jpg,/opt/CAPEv2/storage/analyses/308/shots/0007.jpg
+309,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/309/shots/0001.jpg,
+310,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/310/shots/0001.jpg,
+311,2,6,66,0.0909,0.0252,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/311/shots/0001.jpg,/opt/CAPEv2/storage/analyses/311/shots/0002.jpg
+312,29,58,66,0.8788,0.6812,yes,0009.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/312/shots/0001.jpg,/opt/CAPEv2/storage/analyses/312/shots/0029.jpg
+313,5,54,66,0.8182,0.6633,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/313/shots/0001.jpg,/opt/CAPEv2/storage/analyses/313/shots/0005.jpg
+314,3,54,66,0.8182,0.6631,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/314/shots/0001.jpg,/opt/CAPEv2/storage/analyses/314/shots/0003.jpg
+315,3,7,66,0.1061,0.0475,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/315/shots/0001.jpg,/opt/CAPEv2/storage/analyses/315/shots/0003.jpg
+316,3,54,66,0.8182,0.6629,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/316/shots/0001.jpg,/opt/CAPEv2/storage/analyses/316/shots/0003.jpg
+317,6,54,66,0.8182,0.6532,yes,0003.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/317/shots/0001.jpg,/opt/CAPEv2/storage/analyses/317/shots/0006.jpg
+318,9,54,66,0.8182,0.611,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/318/shots/0001.jpg,/opt/CAPEv2/storage/analyses/318/shots/0009.jpg
+319,6,54,66,0.8182,0.6498,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/319/shots/0001.jpg,/opt/CAPEv2/storage/analyses/319/shots/0006.jpg
+320,0,,,,,unknown,,FAILED,0,,,
+321,0,,,,,unknown,,FAILED,0,,,
+322,1,,,,,unknown,,TRUE_ENCRYPTION,0,,/opt/CAPEv2/storage/analyses/322/shots/0001.jpg,
+323,9,66,66,1.0,0.9405,yes,0008.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/323/shots/0001.jpg,/opt/CAPEv2/storage/analyses/323/shots/0009.jpg
+324,62,45,66,0.6818,0.1826,yes,0044.jpg,TRUE_ENCRYPTION,143,agree,/opt/CAPEv2/storage/analyses/324/shots/0001.jpg,/opt/CAPEv2/storage/analyses/324/shots/0062.jpg
+325,3,54,66,0.8182,0.6629,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/325/shots/0001.jpg,/opt/CAPEv2/storage/analyses/325/shots/0003.jpg
+326,25,11,66,0.1667,0.0646,yes,0006.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/326/shots/0001.jpg,/opt/CAPEv2/storage/analyses/326/shots/0025.jpg
+327,35,9,66,0.1364,0.0529,yes,0029.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/327/shots/0001.jpg,/opt/CAPEv2/storage/analyses/327/shots/0035.jpg
+328,0,,,,,unknown,,FAILED,0,,,
+329,51,54,66,0.8182,0.6604,yes,0009.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/329/shots/0001.jpg,/opt/CAPEv2/storage/analyses/329/shots/0051.jpg
+330,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/330/shots/0001.jpg,
+331,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/331/shots/0001.jpg,
+332,0,,,,,unknown,,FAILED,0,,,
+333,26,31,66,0.4697,0.1004,yes,0026.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/333/shots/0001.jpg,/opt/CAPEv2/storage/analyses/333/shots/0026.jpg
+334,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/334/shots/0001.jpg,
+335,0,,,,,unknown,,FAILED,0,,,
+350,5,7,66,0.1061,0.0473,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/350/shots/0001.jpg,/opt/CAPEv2/storage/analyses/350/shots/0005.jpg
+351,0,,,,,unknown,,FAILED,0,,,
+352,8,54,66,0.8182,0.6628,yes,0004.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/352/shots/0001.jpg,/opt/CAPEv2/storage/analyses/352/shots/0008.jpg
+353,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/353/shots/0001.jpg,
+354,119,66,66,1.0,0.8366,yes,0013.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/354/shots/0001.jpg,/opt/CAPEv2/storage/analyses/354/shots/0119.jpg
+355,3,54,66,0.8182,0.6634,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/355/shots/0001.jpg,/opt/CAPEv2/storage/analyses/355/shots/0003.jpg
+356,3,4,66,0.0606,0.0191,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/356/shots/0001.jpg,/opt/CAPEv2/storage/analyses/356/shots/0003.jpg
+357,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/357/shots/0001.jpg,
+358,28,8,66,0.1212,0.0575,yes,0008.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/358/shots/0001.jpg,/opt/CAPEv2/storage/analyses/358/shots/0028.jpg
+359,19,58,66,0.8788,0.6914,yes,0014.jpg,TRUE_ENCRYPTION,131,agree,/opt/CAPEv2/storage/analyses/359/shots/0001.jpg,/opt/CAPEv2/storage/analyses/359/shots/0019.jpg
+360,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/360/shots/0001.jpg,
+361,27,47,66,0.7121,0.227,yes,0024.jpg,TRUE_ENCRYPTION,121,agree,/opt/CAPEv2/storage/analyses/361/shots/0001.jpg,/opt/CAPEv2/storage/analyses/361/shots/0027.jpg
+362,0,,,,,unknown,,FAILED,0,,,
+363,30,38,66,0.5758,0.1415,yes,0010.jpg,TRUE_ENCRYPTION,102,agree,/opt/CAPEv2/storage/analyses/363/shots/0001.jpg,/opt/CAPEv2/storage/analyses/363/shots/0030.jpg
+364,0,,,,,unknown,,,,,,
+365,115,66,66,1.0,0.832,yes,0007.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/365/shots/0001.jpg,/opt/CAPEv2/storage/analyses/365/shots/0115.jpg
+366,10,54,66,0.8182,0.6629,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/366/shots/0001.jpg,/opt/CAPEv2/storage/analyses/366/shots/0010.jpg
+367,2,2,66,0.0303,0.0119,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/367/shots/0001.jpg,/opt/CAPEv2/storage/analyses/367/shots/0002.jpg
+368,27,15,66,0.2273,0.0826,yes,0012.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/368/shots/0001.jpg,/opt/CAPEv2/storage/analyses/368/shots/0027.jpg
+369,5,13,66,0.197,0.0789,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/369/shots/0001.jpg,/opt/CAPEv2/storage/analyses/369/shots/0005.jpg
+370,4,54,66,0.8182,0.6634,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/370/shots/0001.jpg,/opt/CAPEv2/storage/analyses/370/shots/0004.jpg
+371,41,28,66,0.4242,0.0819,yes,0004.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/371/shots/0001.jpg,/opt/CAPEv2/storage/analyses/371/shots/0041.jpg
+372,5,54,66,0.8182,0.6629,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/372/shots/0001.jpg,/opt/CAPEv2/storage/analyses/372/shots/0005.jpg
+373,0,,,,,unknown,,FAILED,0,,,
+374,41,49,66,0.7424,0.2169,yes,0018.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/374/shots/0001.jpg,/opt/CAPEv2/storage/analyses/374/shots/0041.jpg
+375,14,15,66,0.2273,0.1052,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/375/shots/0001.jpg,/opt/CAPEv2/storage/analyses/375/shots/0014.jpg
+376,96,66,66,1.0,0.8371,yes,0016.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/376/shots/0001.jpg,/opt/CAPEv2/storage/analyses/376/shots/0096.jpg
+377,18,56,66,0.8485,0.6726,yes,0014.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/377/shots/0001.jpg,/opt/CAPEv2/storage/analyses/377/shots/0018.jpg
+378,18,37,66,0.5606,0.145,yes,0016.jpg,TRUE_ENCRYPTION,116,agree,/opt/CAPEv2/storage/analyses/378/shots/0001.jpg,/opt/CAPEv2/storage/analyses/378/shots/0018.jpg
+379,0,,,,,unknown,,FAILED,0,,,
+380,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/380/shots/0001.jpg,
+381,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/381/shots/0001.jpg,
+382,15,12,66,0.1818,0.0779,yes,0011.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/382/shots/0001.jpg,/opt/CAPEv2/storage/analyses/382/shots/0015.jpg
+383,7,12,66,0.1818,0.0705,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/383/shots/0001.jpg,/opt/CAPEv2/storage/analyses/383/shots/0007.jpg
+384,0,,,,,unknown,,FAILED,0,,,
+410,0,,,,,unknown,,FAILED,0,,,
+411,0,,,,,unknown,,FAILED,0,,,
+412,0,,,,,unknown,,FAILED,0,,,
+413,0,,,,,unknown,,,,,,
+414,0,,,,,unknown,,FAILED,0,,,
+415,7,10,66,0.1515,0.0541,yes,0006.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/415/shots/0001.jpg,/opt/CAPEv2/storage/analyses/415/shots/0007.jpg
+416,4,8,66,0.1212,0.06,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/416/shots/0001.jpg,/opt/CAPEv2/storage/analyses/416/shots/0004.jpg
+417,115,54,66,0.8182,0.6634,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/417/shots/0001.jpg,/opt/CAPEv2/storage/analyses/417/shots/0115.jpg
+418,3,8,66,0.1212,0.0731,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/418/shots/0001.jpg,/opt/CAPEv2/storage/analyses/418/shots/0003.jpg
+419,50,34,66,0.5152,0.1419,yes,0036.jpg,TRUE_ENCRYPTION,249,agree,/opt/CAPEv2/storage/analyses/419/shots/0001.jpg,/opt/CAPEv2/storage/analyses/419/shots/0050.jpg
+420,122,66,66,1.0,0.8258,yes,0008.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/420/shots/0001.jpg,/opt/CAPEv2/storage/analyses/420/shots/0122.jpg
+421,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/421/shots/0001.jpg,
+422,40,54,66,0.8182,0.663,yes,0002.jpg,TRUE_ENCRYPTION,87,agree,/opt/CAPEv2/storage/analyses/422/shots/0001.jpg,/opt/CAPEv2/storage/analyses/422/shots/0040.jpg
+423,26,36,66,0.5455,0.1416,yes,0026.jpg,TRUE_ENCRYPTION,2,agree,/opt/CAPEv2/storage/analyses/423/shots/0001.jpg,/opt/CAPEv2/storage/analyses/423/shots/0026.jpg
+424,20,11,66,0.1667,0.0691,yes,0010.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/424/shots/0001.jpg,/opt/CAPEv2/storage/analyses/424/shots/0020.jpg
+425,79,51,66,0.7727,0.229,yes,0021.jpg,TRUE_ENCRYPTION,97,agree,/opt/CAPEv2/storage/analyses/425/shots/0001.jpg,/opt/CAPEv2/storage/analyses/425/shots/0079.jpg
+426,63,46,66,0.697,0.1547,yes,0054.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/426/shots/0001.jpg,/opt/CAPEv2/storage/analyses/426/shots/0063.jpg
+427,40,49,66,0.7424,0.1952,yes,0031.jpg,TRUE_ENCRYPTION,247,agree,/opt/CAPEv2/storage/analyses/427/shots/0001.jpg,/opt/CAPEv2/storage/analyses/427/shots/0040.jpg
+428,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/428/shots/0001.jpg,
+429,42,35,66,0.5303,0.1354,yes,0034.jpg,TRUE_ENCRYPTION,117,agree,/opt/CAPEv2/storage/analyses/429/shots/0001.jpg,/opt/CAPEv2/storage/analyses/429/shots/0042.jpg
+430,35,12,66,0.1818,0.0732,yes,0010.jpg,TRUE_ENCRYPTION,7,agree,/opt/CAPEv2/storage/analyses/430/shots/0001.jpg,/opt/CAPEv2/storage/analyses/430/shots/0035.jpg
+431,95,47,66,0.7121,0.1967,yes,0044.jpg,TRUE_ENCRYPTION,143,agree,/opt/CAPEv2/storage/analyses/431/shots/0001.jpg,/opt/CAPEv2/storage/analyses/431/shots/0095.jpg
+432,8,8,66,0.1212,0.0464,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/432/shots/0001.jpg,/opt/CAPEv2/storage/analyses/432/shots/0008.jpg
+433,57,54,66,0.8182,0.6603,yes,0004.jpg,TRUE_ENCRYPTION,59,agree,/opt/CAPEv2/storage/analyses/433/shots/0001.jpg,/opt/CAPEv2/storage/analyses/433/shots/0057.jpg
+434,43,10,66,0.1515,0.0499,yes,0010.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/434/shots/0001.jpg,/opt/CAPEv2/storage/analyses/434/shots/0043.jpg
+435,53,57,66,0.8636,0.686,yes,0020.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/435/shots/0001.jpg,/opt/CAPEv2/storage/analyses/435/shots/0053.jpg
+436,40,11,66,0.1667,0.0548,yes,0003.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/436/shots/0001.jpg,/opt/CAPEv2/storage/analyses/436/shots/0040.jpg
+437,4,8,66,0.1212,0.047,yes,0003.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/437/shots/0001.jpg,/opt/CAPEv2/storage/analyses/437/shots/0004.jpg
+438,47,10,66,0.1515,0.0628,yes,0034.jpg,TRUE_ENCRYPTION,52,agree,/opt/CAPEv2/storage/analyses/438/shots/0001.jpg,/opt/CAPEv2/storage/analyses/438/shots/0047.jpg
+439,49,11,66,0.1667,0.0601,yes,0006.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/439/shots/0001.jpg,/opt/CAPEv2/storage/analyses/439/shots/0049.jpg
+440,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/440/shots/0001.jpg,
+441,7,54,66,0.8182,0.6634,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/441/shots/0001.jpg,/opt/CAPEv2/storage/analyses/441/shots/0007.jpg
+442,8,8,66,0.1212,0.0444,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/442/shots/0001.jpg,/opt/CAPEv2/storage/analyses/442/shots/0008.jpg
+443,61,66,66,1.0,0.85,yes,0056.jpg,TRUE_ENCRYPTION,8,agree,/opt/CAPEv2/storage/analyses/443/shots/0001.jpg,/opt/CAPEv2/storage/analyses/443/shots/0061.jpg
+444,26,10,66,0.1515,0.0541,yes,0012.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/444/shots/0001.jpg,/opt/CAPEv2/storage/analyses/444/shots/0026.jpg
+445,8,54,66,0.8182,0.6629,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/445/shots/0001.jpg,/opt/CAPEv2/storage/analyses/445/shots/0008.jpg
+446,41,40,66,0.6061,0.1275,yes,0041.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/446/shots/0001.jpg,/opt/CAPEv2/storage/analyses/446/shots/0041.jpg
+447,55,66,66,1.0,0.9621,yes,0018.jpg,TRUE_ENCRYPTION,50,agree,/opt/CAPEv2/storage/analyses/447/shots/0001.jpg,/opt/CAPEv2/storage/analyses/447/shots/0055.jpg
+448,5,8,66,0.1212,0.0459,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/448/shots/0001.jpg,/opt/CAPEv2/storage/analyses/448/shots/0005.jpg
+449,22,66,66,1.0,0.9721,yes,0017.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/449/shots/0001.jpg,/opt/CAPEv2/storage/analyses/449/shots/0022.jpg
+450,9,8,66,0.1212,0.0587,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/450/shots/0001.jpg,/opt/CAPEv2/storage/analyses/450/shots/0009.jpg
+451,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/451/shots/0001.jpg,
+452,2,4,66,0.0606,0.0166,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/452/shots/0001.jpg,/opt/CAPEv2/storage/analyses/452/shots/0002.jpg
+453,63,66,66,1.0,0.9423,yes,0014.jpg,TRUE_ENCRYPTION,111,agree,/opt/CAPEv2/storage/analyses/453/shots/0001.jpg,/opt/CAPEv2/storage/analyses/453/shots/0063.jpg
+454,26,12,66,0.1818,0.0683,yes,0017.jpg,TRUE_ENCRYPTION,8,agree,/opt/CAPEv2/storage/analyses/454/shots/0001.jpg,/opt/CAPEv2/storage/analyses/454/shots/0026.jpg
+455,42,15,66,0.2273,0.0836,yes,0004.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/455/shots/0001.jpg,/opt/CAPEv2/storage/analyses/455/shots/0042.jpg
+456,60,66,66,1.0,0.8497,yes,0002.jpg,WEAK_VICTIM_ACTIVITY,2,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/456/shots/0001.jpg,/opt/CAPEv2/storage/analyses/456/shots/0060.jpg
+457,45,10,66,0.1515,0.0485,yes,0015.jpg,TRUE_ENCRYPTION,0,agree,/opt/CAPEv2/storage/analyses/457/shots/0001.jpg,/opt/CAPEv2/storage/analyses/457/shots/0045.jpg
+458,5,54,66,0.8182,0.6369,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/458/shots/0001.jpg,/opt/CAPEv2/storage/analyses/458/shots/0005.jpg
+459,2,2,66,0.0303,0.0112,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/459/shots/0001.jpg,/opt/CAPEv2/storage/analyses/459/shots/0002.jpg
+460,240,54,66,0.8182,0.6629,yes,0002.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/460/shots/0001.jpg,/opt/CAPEv2/storage/analyses/460/shots/0240.jpg
+461,8,66,66,1.0,0.9846,yes,0007.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/461/shots/0001.jpg,/opt/CAPEv2/storage/analyses/461/shots/0008.jpg
+462,3,10,66,0.1515,0.0797,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/462/shots/0001.jpg,/opt/CAPEv2/storage/analyses/462/shots/0003.jpg
+463,5,10,66,0.1515,0.0755,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/463/shots/0001.jpg,/opt/CAPEv2/storage/analyses/463/shots/0005.jpg
+464,46,41,66,0.6212,0.1779,yes,0020.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/464/shots/0001.jpg,/opt/CAPEv2/storage/analyses/464/shots/0046.jpg
+465,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/465/shots/0001.jpg,
+466,43,11,66,0.1667,0.058,yes,0016.jpg,NO_VICTIM_ACTIVITY,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/466/shots/0001.jpg,/opt/CAPEv2/storage/analyses/466/shots/0043.jpg
+467,58,64,66,0.9697,0.7461,yes,0016.jpg,TRUE_ENCRYPTION,61,agree,/opt/CAPEv2/storage/analyses/467/shots/0001.jpg,/opt/CAPEv2/storage/analyses/467/shots/0058.jpg
+468,41,10,66,0.1515,0.0697,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/468/shots/0001.jpg,/opt/CAPEv2/storage/analyses/468/shots/0041.jpg
+469,8,54,66,0.8182,0.6634,yes,0005.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/469/shots/0001.jpg,/opt/CAPEv2/storage/analyses/469/shots/0008.jpg
+470,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/470/shots/0001.jpg,
+471,36,37,66,0.5606,0.1537,yes,0012.jpg,TRUE_ENCRYPTION,126,agree,/opt/CAPEv2/storage/analyses/471/shots/0001.jpg,/opt/CAPEv2/storage/analyses/471/shots/0036.jpg
+472,40,46,66,0.697,0.2044,yes,0037.jpg,TRUE_ENCRYPTION,202,agree,/opt/CAPEv2/storage/analyses/472/shots/0001.jpg,/opt/CAPEv2/storage/analyses/472/shots/0040.jpg
+473,5,7,66,0.1061,0.0431,yes,0003.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/473/shots/0001.jpg,/opt/CAPEv2/storage/analyses/473/shots/0005.jpg
+474,34,44,66,0.6667,0.1823,yes,0015.jpg,TRUE_ENCRYPTION,243,agree,/opt/CAPEv2/storage/analyses/474/shots/0001.jpg,/opt/CAPEv2/storage/analyses/474/shots/0034.jpg
+475,3,0,66,0.0,0.0,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/475/shots/0001.jpg,/opt/CAPEv2/storage/analyses/475/shots/0003.jpg
+476,3,0,66,0.0,0.0011,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/476/shots/0001.jpg,/opt/CAPEv2/storage/analyses/476/shots/0003.jpg
+477,4,8,66,0.1212,0.0574,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/477/shots/0001.jpg,/opt/CAPEv2/storage/analyses/477/shots/0004.jpg
+478,48,41,66,0.6212,0.1578,yes,0023.jpg,TRUE_ENCRYPTION,116,agree,/opt/CAPEv2/storage/analyses/478/shots/0001.jpg,/opt/CAPEv2/storage/analyses/478/shots/0048.jpg
+479,1,,,,,unknown,,FAILED,0,,/opt/CAPEv2/storage/analyses/479/shots/0001.jpg,
+480,46,44,66,0.6667,0.1961,yes,0017.jpg,TRUE_ENCRYPTION,158,agree,/opt/CAPEv2/storage/analyses/480/shots/0001.jpg,/opt/CAPEv2/storage/analyses/480/shots/0046.jpg
+481,2,2,66,0.0303,0.012,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/481/shots/0001.jpg,/opt/CAPEv2/storage/analyses/481/shots/0002.jpg
+482,39,44,66,0.6667,0.1876,yes,0032.jpg,TRUE_ENCRYPTION,203,agree,/opt/CAPEv2/storage/analyses/482/shots/0001.jpg,/opt/CAPEv2/storage/analyses/482/shots/0039.jpg
+483,6,6,66,0.0909,0.0438,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/483/shots/0001.jpg,/opt/CAPEv2/storage/analyses/483/shots/0006.jpg
+484,44,48,66,0.7273,0.199,yes,0040.jpg,TRUE_ENCRYPTION,194,agree,/opt/CAPEv2/storage/analyses/484/shots/0001.jpg,/opt/CAPEv2/storage/analyses/484/shots/0044.jpg
+485,5,12,66,0.1818,0.0717,yes,0004.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/485/shots/0001.jpg,/opt/CAPEv2/storage/analyses/485/shots/0005.jpg
+486,34,46,66,0.697,0.2018,yes,0020.jpg,TRUE_ENCRYPTION,249,agree,/opt/CAPEv2/storage/analyses/486/shots/0001.jpg,/opt/CAPEv2/storage/analyses/486/shots/0034.jpg
+487,6,8,66,0.1212,0.0557,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/487/shots/0001.jpg,/opt/CAPEv2/storage/analyses/487/shots/0006.jpg
+488,54,46,66,0.697,0.2043,yes,0015.jpg,TRUE_ENCRYPTION,124,agree,/opt/CAPEv2/storage/analyses/488/shots/0001.jpg,/opt/CAPEv2/storage/analyses/488/shots/0054.jpg
+489,3,8,66,0.1212,0.0576,yes,0002.jpg,FAILED,0,REVIEW: screen changed but verdict says no encryption,/opt/CAPEv2/storage/analyses/489/shots/0001.jpg,/opt/CAPEv2/storage/analyses/489/shots/0003.jpg
+490,59,46,66,0.697,0.2042,yes,0019.jpg,TRUE_ENCRYPTION,165,agree,/opt/CAPEv2/storage/analyses/490/shots/0001.jpg,/opt/CAPEv2/storage/analyses/490/shots/0059.jpg
+491,3,6,66,0.0909,0.0482,no,0002.jpg,FAILED,0,agree,/opt/CAPEv2/storage/analyses/491/shots/0001.jpg,/opt/CAPEv2/storage/analyses/491/shots/0003.jpg

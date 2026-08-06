@@ -342,3 +342,80 @@ task_id,label,label_as_given,batch,note
 498,N,N,3,
 499,N,N,3,
 500,A,A,3,
+1345,N,N,4,"BlackCat, exits in ~120 calls without an operator access token"
+1346,X,X,4,"installer UI shown, no ransomware behaviour observed"
+1347,N,N,4,reported as unable to execute; wrong architecture or corrupt PE
+1348,A,A,4,
+1349,N,N,4,
+1350,A,N,4,"originally N; Lorenz destroyed 5 decoy files and dropped Help.txt, which is encryption the screenshot pass did not show"
+1351,A2,A2,4,
+1352,A2,A2,4,
+1353,A,A,4,
+1354,N,A2,4,"originally A2; the 659 writes are PyInstaller unpacking its own Python runtime and the bundled cryptography package. Nothing was encrypted -- intent, not outcome"
+1355,A2,A2,4,
+1356,N,N,4,DLL rather than exe
+1357,A,A,4,
+1358,N,N,4,
+1359,N,N,4,"BlackCat, same as 1345"
+1360,N,N,4,
+1361,A,A,4,
+1362,A,A,4,
+1363,N,N,4,
+1364,A2,A2,4,
+1365,A2,A2,4,
+1366,A2,A2,4,
+1367,A,A,4,
+1368,A,A,4,
+1369,A2,A2,4,
+1370,N,N,4,
+1371,N,N,4,"BlackCat, same as 1345"
+1372,N,N,4,
+1373,A2,A2,4,
+1374,A,A,4,
+1375,A2,A2,4,
+1376,A2,A2,4,
+1377,A2,A2,4,
+1378,A2,A2,4,
+1379,A,A,4,
+1380,A,A,4,
+1381,A2,A2,4,
+1382,N,N,4,"preparation only, no encryption"
+1383,A2,A2,4,
+1384,A,A,4,
+1385,A2,A2,4,
+1386,A2,A2,4,
+1387,A2,A2,4,
+1388,A2,A2,4,
+1389,A,A,4,
+1390,A,A,4,
+1391,A2,A2,4,
+1392,N,N,4,
+1393,N,N,4,
+1394,A,A,4,
+1395,A,A,4,
+1396,A,A,4,
+1397,A,A,4,
+1398,A,A,4,
+1399,A,A,4,
+1400,N,N,4,
+1401,A2,A2,4,
+1402,A,A,4,
+1403,N,N,4,DLL rather than exe
+1404,A,A,4,
+1405,A2,A2,4,
+1406,X,X,4,some activity but nothing attributable to ransomware
+1407,N,N,4,DLL rather than exe
+1408,A2,A2,4,
+1409,A2,A2,4,
+1410,N,N,4,DLL rather than exe
+1411,A2,A2,4,"MountLocker; extension change not visible by eye, caught by the ransom note"
+1412,N,N,4,
+1413,A,A,4,
+1414,N,N,4,DLL rather than exe
+1415,A,A,4,
+1416,N,N,4,
+1417,N,N,4,DLL rather than exe
+1418,A2,A2,4,
+1419,A2,A2,4,"MountLocker, same as 1411"
+1420,N,N,4,
+1421,A2,A2,4,"MountLocker, same as 1411"

@@ -218,10 +218,25 @@ def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
             target = archive_path / f"task_{tid}_report.json.gz"
             if dry_run:
                 print(f"   [dry-run] would archive task {tid} ({reason}) -> {target.name}")
+                archived += 1
             else:
-                with open(report, "rb") as src, gzip.open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
-            archived += 1
+                # Archive first, and do not delete unless it succeeded. The
+                # archive is the only copy that survives; writing it can fail
+                # for the same reason cleanup was needed in the first place --
+                # a full disk -- and deleting anyway would destroy the report
+                # to reclaim space that the archive was supposed to save.
+                tmp = target.with_suffix(".gz.part")
+                try:
+                    with open(report, "rb") as src, gzip.open(tmp, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    tmp.replace(target)
+                    archived += 1
+                except OSError as e:
+                    print(f"   [!] could not archive task {tid}: {e}")
+                    print(f"       keeping the analysis directory")
+                    tmp.unlink(missing_ok=True)
+                    failed += 1
+                    continue
 
         if dry_run:
             print(f"   [dry-run] would delete analysis dir {tid} ({reason})")
@@ -234,9 +249,11 @@ def cleanup_analyses(analyses_dir, archive_dir, extracted_ids, results_csv,
     print(f"\n[cleanup] archived={archived} deleted={deleted} kept={skipped}"
           + (f" failed={failed}" if failed else ""))
     if failed:
-        print(f"[cleanup] {failed} directories could not be removed. CAPE writes")
-        print(f"          them as its own user, so deleting them needs either")
-        print(f"          NOPASSWD sudo for that user, or a manual pass:")
+        print(f"[cleanup] {failed} directories were kept: either the archive could")
+        print(f"          not be written, or the directory could not be removed.")
+        print(f"          CAPE writes some files as its own user, so deleting")
+        print(f"          them needs either NOPASSWD sudo for that user, or")
+        print(f"          a manual pass:")
         print(f"             sudo rm -rf {analyses_dir}/<id>")
     if dry_run:
         print("[cleanup] dry run -- nothing was actually changed")

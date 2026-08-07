@@ -671,7 +671,22 @@ def main():
         samples_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = load_manifest(args.manifest)
-    print(f"Manifest: {args.manifest} ({len(manifest)} known hashes)")
+
+    # Hashes held by another machine, read but never written.
+    #
+    # Two hosts collecting into one shared manifest cannot work: both have
+    # cron jobs rewriting it every half hour, and git cannot merge concurrent
+    # edits to the same CSV rows without scrambling the sample history. So
+    # each host owns its own manifest, and consults the other's only to avoid
+    # downloading what has already been taken.
+    external = {}
+    for path in (args.also_known or []):
+        other = load_manifest(path)
+        external.update(other)
+        print(f"Also known: {path} ({len(other)} hashes, read-only)")
+
+    print(f"Manifest: {args.manifest} ({len(manifest)} known hashes"
+          f"{f', {len(external)} more from elsewhere' if external else ''})")
     if args.families:
         print(f"Families: {', '.join(args.families)}")
     if args.tags:
@@ -739,7 +754,7 @@ def main():
             sha = entry.get("sha256_hash")
             if not sha:
                 continue
-            if sha in manifest or sha in seen_this_run:
+            if sha in manifest or sha in external or sha in seen_this_run:
                 dupe_count += 1
             else:
                 new_entries.append(entry)

@@ -1201,8 +1201,6 @@ b85586f95412bc69f3dceb0539f27c79c74e318b249554f0eace45f3f073c039,b85586f95412bc6
 f02622129e7774b7673e2a9f62bb4a208d4a142b5d925532c7920481549bd07b,f02622129e7774b7673e2a9f62bb4a208d4a142b5d925532c7920481549bd07b,Interlock,malwarebazaar,ransomware,2026-08-06 11:48:06 UTC,analyzed,1416,NO_VICTIM_ACTIVITY,file_type=exe
 a26f0a2da63a838161a7d335aaa5e4b314a232acc15dcabdb6f6dbec63cda642,matrix.exe,Interlock,malwarebazaar,ransomware,2026-08-06 11:48:08 UTC,analyzed,1418,TRUE_ENCRYPTION,file_type=exe
 c9920e995fbc98cd3883ef4c4520300d5e82bab5d2a5c781e9e9fe694a43e82f,c9920e995fbc98cd3883ef4c4520300d5e82bab5d2a5c781e9e9fe694a43e82f,Interlock,malwarebazaar,ransomware,2026-08-06 11:48:09 UTC,analyzed,1420,FAILED,file_type=exe
-<<<<<<< HEAD
-=======
 1ca67af90400ee6cbbd42175293274a0f5dc05315096cb2e214e4bfe12ffb71f,1ca67af90400ee6cbbd42175293274a0f5dc05315096cb2e214e4bfe12ffb71f.exe,Payload,malwarebazaar,ransomware,2026-08-07 05:10:57 UTC,submitted,1426,,file_type=exe
 c5f526cc62688cf34c49d098dab81e24e4294f832ada57433ef505d5ac6da8f3,c5f526cc62688cf34c49d098dab81e24e4294f832ada57433ef505d5ac6da8f3,NightSpire,malwarebazaar,ransomware,2026-08-07 05:11:01 UTC,submitted,1425,,file_type=exe
 2c3f8889c9f5d765632ad91b4cc2a852c54845e143dbd2b68359b6f9cdfd8f99,2c3f8889c9f5d765632ad91b4cc2a852c54845e143dbd2b68359b6f9cdfd8f99,NightSpire,malwarebazaar,ransomware,2026-08-07 05:11:04 UTC,submitted,1430,,file_type=exe
@@ -1387,4 +1385,3 @@ f8a505c194572963b8defea169a2bf9b7e87ba2a38df1afb990623715a81daf3,f8a505c19457296
 57eab146f612a387a6d0db7073f200742634a31cc78dda6f59cfdc8996ddca4a,2.exe,Makop,malwarebazaar,ransomware,2026-08-07 16:41:50 UTC,pending,,,file_type=exe
 4aa3ae979ad5fb790408c90ebe653592f5861eb7b8dac54cad59e9ac1c54bac4,1.exe,Makop,malwarebazaar,ransomware,2026-08-07 16:41:51 UTC,pending,,,file_type=exe
 bc225c5fe58ce3b42512871afdcc4513a870812b6b6477d8fe53bca77100660e,이력서_경력사항은 모두 기재하였습니다 확인부탁드리겠습니다 감사합니다.exe,Makop,malwarebazaar,ransomware,2026-08-07 16:41:53 UTC,pending,,,file_type=exe
->>>>>>> cc90b61 (adding analysis)

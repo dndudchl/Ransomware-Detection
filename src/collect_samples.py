@@ -135,7 +135,16 @@ def load_manifest(manifest_path):
     entries = {}
     with open(manifest_path, newline="") as f:
         for row in csv.DictReader(f):
-            entries[row["sha256"]] = row
+            sha = row.get("sha256")
+            if not sha:
+                continue
+            # csv.DictReader fills missing trailing columns with None, and a
+            # dict.get default does not apply when the key exists with a None
+            # value. That is enough to break sorting, which compares
+            # added_date against a string. Several tools rewrite this file, so
+            # one of them leaving a short row behind should not stop
+            # collection; normalising here makes every consumer safe.
+            entries[sha] = {k: ("" if v is None else v) for k, v in row.items()}
     return entries
 
 
@@ -143,8 +152,9 @@ def save_manifest(manifest_path, entries):
     with open(manifest_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
-        for sha, row in sorted(entries.items(), key=lambda kv: kv[1].get("added_date", "")):
-            writer.writerow({k: row.get(k, "") for k in FIELDNAMES})
+        for sha, row in sorted(entries.items(),
+                                key=lambda kv: kv[1].get("added_date") or ""):
+            writer.writerow({k: (row.get(k) or "") for k in FIELDNAMES})
 
 
 def get_auth_key():

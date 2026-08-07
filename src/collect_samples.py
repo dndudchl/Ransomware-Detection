@@ -586,6 +586,11 @@ def main():
                          help="Directory to store downloaded samples (default: ./samples)")
     parser.add_argument("--manifest", default="manifest.csv",
                          help="Manifest CSV path (default: manifest.csv)")
+    parser.add_argument("--also-known", nargs="+", default=None, metavar="CSV",
+                         help="Additional manifests to treat as already collected. "
+                              "Used when a second machine is collecting in parallel: "
+                              "point each host at the other's manifest so neither "
+                              "downloads what the other already has. Read only.")
     parser.add_argument("--file-type", default=None,
                          help="Only take samples whose file_type matches (e.g. exe)")
     parser.add_argument("--max-size", type=int, default=DEFAULT_MAX_SAMPLE_BYTES,

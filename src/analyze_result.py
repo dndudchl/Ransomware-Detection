@@ -194,8 +194,14 @@ def batch_targets(base):
     if dirs:
         return dirs, False
 
-    archives = sorted(p for p in base.iterdir()
-                      if p.is_file() and (p.suffix == ".gz" or p.name.endswith(".json")))
+    # Sorted by the task number inside the name rather than by the name, so
+    # task_100 does not land after task_1000 the way text ordering puts it.
+    archives = sorted(
+        (p for p in base.iterdir()
+         if p.is_file() and (p.suffix == ".gz" or p.name.endswith(".json"))),
+        key=lambda p: (int(m.group(1))
+                       if (m := re.search(r"task[_-]?(\d+)", p.name))
+                       else 10**9, p.name))
     return archives, True
 
 

@@ -1189,9 +1189,15 @@ def main():
                           key=lambda d: int(d.name))
         if not subdirs:
             # A directory of archives rather than of analysis directories.
-            archives = sorted(p for p in base.iterdir()
-                              if p.is_file() and (p.suffix == ".gz"
-                                                   or p.name.endswith(".json")))
+            # Sorted by the task number inside the name, not by the name
+            # itself: "task_100" sorts before "task_1000" as text, which
+            # scatters the output rows into an order that looks arbitrary.
+            archives = sorted(
+                (p for p in base.iterdir()
+                 if p.is_file() and (p.suffix == ".gz" or p.name.endswith(".json"))),
+                key=lambda p: (int(m.group(1))
+                               if (m := re.search(r"task[_-]?(\d+)", p.name))
+                               else 10**9, p.name))
             if archives:
                 print(f"No analysis directories here; reading {len(archives)} "
                       f"archived reports instead\n")

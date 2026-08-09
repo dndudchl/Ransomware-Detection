@@ -1206,9 +1206,26 @@ def main():
         print(f"{'task':<8} {'family':<13} {'coverage':<11} {'features'}")
         print("-" * 100)
 
+        def task_id_of(path):
+            """
+            The task number for a batch entry.
+
+            An analysis directory is named after its task, so its name is the
+            id. An archive is named task_1234_report.json.gz, and looking the
+            whole filename up in the verdict table silently finds nothing --
+            which left the verdict column empty for every row extracted from
+            archives, and with it the only way to tell an encrypting run from
+            one that merely executed.
+            """
+            if path.is_dir():
+                return path.name
+            m = re.search(r"task[_-]?(\d+)", path.name)
+            return m.group(1) if m else path.stem
+
         n_full = n_static = 0
         for d in subdirs:
-            verdict = verdict_by_id.get(d.name) if verdict_by_id else args.keep_verdict
+            task_id = task_id_of(d)
+            verdict = verdict_by_id.get(task_id) if verdict_by_id else args.keep_verdict
             if verdict != args.keep_verdict and not args.static_for_all:
                 continue
             # Coverage is decided per analysis, from whether the sandbox saw
@@ -1230,7 +1247,7 @@ def main():
         print(f"\n[done] {processed} rows written: {n_full} full, {n_static} static-only")
         if verdict_by_id:
             enc = sum(1 for d in subdirs
-                      if verdict_by_id.get(d.name) == args.keep_verdict)
+                      if verdict_by_id.get(task_id_of(d)) == args.keep_verdict)
             print(f"        of the full rows, those that reached {args.keep_verdict} "
                   f"vs ran without it is recorded in the verdict column")
         if args.features_out:

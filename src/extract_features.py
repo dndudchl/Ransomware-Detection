@@ -1184,12 +1184,14 @@ def main():
                 print(f"Restricting to {n_pass} analyses with verdict "
                       f"{args.keep_verdict}\n")
 
-        subdirs = sorted((d for d in base.iterdir() if d.is_dir()),
-                          key=lambda d: int(d.name) if d.name.isdigit() else 0)
+        # Numerically named directories only; see the note in analyze_result.
+        subdirs = sorted((d for d in base.iterdir() if d.is_dir() and d.name.isdigit()),
+                          key=lambda d: int(d.name))
         if not subdirs:
             # A directory of archives rather than of analysis directories.
             archives = sorted(p for p in base.iterdir()
-                              if p.suffix == ".gz" or p.name.endswith(".json"))
+                              if p.is_file() and (p.suffix == ".gz"
+                                                   or p.name.endswith(".json")))
             if archives:
                 print(f"No analysis directories here; reading {len(archives)} "
                       f"archived reports instead\n")

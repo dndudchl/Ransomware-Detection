@@ -183,12 +183,19 @@ def batch_targets(base):
     otherwise archived reports sitting in the directory.
     """
     base = Path(base)
-    dirs = sorted((d for d in base.iterdir() if d.is_dir()),
-                   key=lambda d: int(d.name) if d.name.isdigit() else 0)
+
+    # Only numerically named directories are analysis directories. Anything
+    # else sharing the folder -- a stray copy, a subdirectory of notes --
+    # would otherwise be taken as the whole batch, and the archives beside it
+    # silently ignored. That happened: one unrelated directory in an archive
+    # folder made 1,261 reports invisible and the run reported "0 of 0".
+    dirs = sorted((d for d in base.iterdir() if d.is_dir() and d.name.isdigit()),
+                   key=lambda d: int(d.name))
     if dirs:
         return dirs, False
+
     archives = sorted(p for p in base.iterdir()
-                      if p.suffix == ".gz" or p.name.endswith(".json"))
+                      if p.is_file() and (p.suffix == ".gz" or p.name.endswith(".json")))
     return archives, True
 
 

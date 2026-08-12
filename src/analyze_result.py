@@ -130,6 +130,18 @@ MIN_DESTROYED_DECOY_FILES = 3
 # separates them.
 MIN_APPEND_RENAMES = 8
 
+# Renames onto one shared new extension needed before that counts on its own.
+# Set well above what bulk conversion produces: a person converting a folder
+# of images works in tens, while the runs this catches rename thousands.
+MIN_SHARED_EXTENSION_RENAMES = 50
+
+# Extensions ordinary software renames onto, excluded from the shared
+# extension check so that build systems and editors do not register.
+BENIGN_TARGET_EXTENSIONS = {
+    "tmp", "bak", "old", "log", "part", "partial", "download", "crdownload",
+    "swp", "orig", "sav", "~",
+}
+
 # A note whose name does not state its purpose has to appear in at least this
 # many directories before it counts. Dropping one copy per directory is what
 # separates a ransom note from an application's readme; measured on the
@@ -155,6 +167,19 @@ MIN_RANSOM_NOTE_DIRS = 2
 # coincidences. It is the pattern the thresholds were built to catch, seen
 # from just below each of them.
 MIN_CORROBORATING_AXES = 2
+
+# Minimum magnitude for an axis to count toward corroboration.
+#
+# Corroboration was built on the observation that no non-encrypting run
+# registered on any axis at all, so any two together meant something. Adding
+# a fourth axis weakened that: a build system renaming forty files onto .tmp
+# alongside a readme.md, and a log rotation producing app.log.1 through .4,
+# both reached two axes and were called encryption.
+#
+# Requiring a handful of events per axis restores the property. A single
+# rename or one stray note is not evidence of anything; several of each,
+# occurring together, still is.
+MIN_EVENTS_PER_AXIS = 1
 
 MANIFEST_FIELDNAMES = [
     "sha256", "original_filename", "family", "source", "label",
@@ -254,10 +279,20 @@ def count_file_events(report):
 # corroboration -- either the file appearing across several directories, or
 # one of the explicit words below.
 RANSOM_NOTE_WORDS = [
-    "readme", "read_me", "read-me", "recover", "restore", "decrypt",
-    "how_to", "howto", "how-to", "instruction", "unlock", "ransom",
+    "readme", "read_me", "read-me", "read me",
+    "recover", "restore", "decrypt", "unlock", "ransom", "instruction",
+    "how_to", "howto", "how-to", "how to",
     "help_", "_info", "-info", "files_back", "your_files", "important",
+    "attention", "warning",
 ]
+
+# Separators are interchangeable in these names, and only some spellings were
+# listed. One sample dropped "Read Me Please!.txt" into 83 directories and
+# registered nothing, because the list held readme, read_me and read-me but
+# not the spaced form. Rather than keep adding spellings, the name is
+# normalised before matching: separators collapse away, so readme, read_me,
+# read-me and "read me" all become the same string.
+NOTE_SEPARATORS = str.maketrans({" ": "", "_": "", "-": "", ".": "", "!": ""})
 
 # Words that state the purpose outright. Observed note names in this dataset
 # include "#howtorecover.txt", "readme_to_decrypt.txt", "restore-my-files.txt"
@@ -265,9 +300,8 @@ RANSOM_NOTE_WORDS = [
 # A name like this is taken as sufficient on its own, because some families
 # drop their note in a single directory and would otherwise go unnoticed.
 RANSOM_NOTE_EXPLICIT = [
-    "decrypt", "recover", "restore", "unlock", "ransom",
-    "howto", "how_to", "how-to", "how to",
-    "files_back", "filesback", "your_files", "yourfiles", "getback", "get_back",
+    "decrypt", "recover", "restore", "unlock", "ransom", "howto",
+    "filesback", "yourfiles", "getback", "readmeplease",
 ]
 # Extensions a ransom note will never have. This is an exclusion list rather
 # than a list of permitted document types, because an allowlist only sees the
@@ -324,7 +358,9 @@ def detect_ransom_notes(report):
             ext = basename.rsplit(".", 1)[-1] if "." in basename else ""
             if ext in NON_NOTE_EXTENSIONS:
                 continue
-            if not any(word in basename for word in RANSOM_NOTE_WORDS):
+            flattened = basename.translate(NOTE_SEPARATORS)
+            if not any(word.translate(NOTE_SEPARATORS) in flattened
+                        for word in RANSOM_NOTE_WORDS):
                 continue
             by_basename[basename].add(directory)
 
@@ -334,7 +370,8 @@ def detect_ransom_notes(report):
 
     # Prefer a name that states its purpose; otherwise the widest spread.
     explicit = {n: d for n, d in by_basename.items()
-                if any(w in n for w in RANSOM_NOTE_EXPLICIT)}
+                if any(w.translate(NOTE_SEPARATORS) in n.translate(NOTE_SEPARATORS)
+                        for w in RANSOM_NOTE_EXPLICIT)}
     source = explicit or by_basename
     name, dirs = max(source.items(), key=lambda kv: len(kv[1]))
 
@@ -344,6 +381,73 @@ def detect_ransom_notes(report):
         "ransom_note_candidates": len(by_basename),
         "ransom_note_explicit": int(bool(explicit)),
     }
+
+
+def count_shared_new_extension(report):
+    """
+    Files renamed onto one shared extension, whatever happened to the rest of
+    the name.
+
+    The append check requires the new name to begin with the old one, which
+    is how Cuba (.cuba) and Clop (.Clop) work. Other families replace the
+    name outright:
+
+        A3DUtils.dll  ->  KCpJMTRFQkQftJKmayIH901lQ0TwALlR.[MrJeck@Cock.Li]
+
+    Nothing of the original survives, so the append check sees nothing -- and
+    in the run this comes from, 4,908 files were renamed this way and every
+    axis read zero.
+
+    What does survive is the extension. All 4,908 landed on the same one, and
+    that is the part worth counting: a rename that gives many files an
+    identical new suffix is the signature of encryption regardless of what it
+    did to the stem. Ordinary software converting files in bulk would share
+    an extension too, which is why this counts renames onto an extension the
+    file did not already have, and why the threshold is set where a handful
+    of conversions cannot reach it.
+
+    Returns (count on the most common new extension, that extension).
+    """
+    by_extension = defaultdict(int)
+
+    for event in report.get("behavior", {}).get("enhanced", []) or []:
+        if event.get("object") != "file" or event.get("event") != "move":
+            continue
+        data = event.get("data", {}) or {}
+        src, dst = data.get("from"), data.get("to")
+        if not src or not dst:
+            continue
+
+        src_name = src.replace("/", "\\").split("\\")[-1]
+        dst_name = dst.replace("/", "\\").split("\\")[-1]
+        if "." not in dst_name:
+            continue
+
+        dst_ext = dst_name[dst_name.index("."):].lower()
+        src_ext = src_name[src_name.index("."):].lower() if "." in src_name else ""
+        if dst_ext == src_ext:
+            continue
+
+        # Appending a suffix also produces a new extension, so without this
+        # the append check and this one count the same rename, and any
+        # append-renaming run reaches two axes by itself. This exists for the
+        # renames the append check cannot see: those that discard the stem.
+        if dst.startswith(src):
+            continue
+        # Bare numbers are log rotation and backup numbering -- app.log
+        # becomes app.log.1. A family needs a marker it can recognise later.
+        if dst_ext.lstrip(".").isdigit():
+            continue
+        # Extensions ordinary software renames onto in bulk.
+        if dst_ext.lstrip(".") in BENIGN_TARGET_EXTENSIONS:
+            continue
+
+        by_extension[dst_ext] += 1
+
+    if not by_extension:
+        return 0, ""
+    ext, n = max(by_extension.items(), key=lambda kv: kv[1])
+    return n, ext[:40]
 
 
 def count_append_renames(report):
@@ -531,6 +635,10 @@ def analyze(report, victim_dirs):
     n_append, n_suffixes, _ = count_append_renames(report)
     stats["append_renames"] = n_append
     stats["distinct_rename_suffixes"] = n_suffixes
+
+    n_shared_ext, shared_ext = count_shared_new_extension(report)
+    stats["shared_extension_renames"] = n_shared_ext
+    stats["shared_extension"] = shared_ext
     stats.update(detect_ransom_notes(report))
     note_dirs = stats.get("ransom_note_dirs", 0)
     note_explicit = stats.get("ransom_note_explicit", 0)
@@ -538,8 +646,15 @@ def analyze(report, victim_dirs):
     destroyed, read_only, destructive_events, victim_counts = stage2_victim_check(
         report, victim_dirs)
 
-    # Independent kinds of evidence, counted regardless of magnitude.
-    corroborating_axes = sum([destroyed > 0, n_append > 0, note_dirs > 0])
+    # Independent kinds of evidence, each needing enough events to mean
+    # something. Counting any non-zero value worked while there were three
+    # axes -- no non-encrypting run registered on any of them -- but a fourth
+    # axis made accidental pairs reachable: a build system renaming onto .tmp
+    # beside a readme.md, or a log rotation producing app.log.1 to .4.
+    corroborating_axes = sum([destroyed >= MIN_EVENTS_PER_AXIS,
+                               n_append >= MIN_EVENTS_PER_AXIS,
+                               note_dirs >= 1,
+                               n_shared_ext >= MIN_EVENTS_PER_AXIS])
     stats["corroborating_axes"] = corroborating_axes
 
     # Two independent kinds of evidence, either of which settles it.
@@ -558,6 +673,10 @@ def analyze(report, victim_dirs):
         reason = (f"{n_append} append-renames outside the decoy folders "
                   f"({n_suffixes} distinct suffix"
                   f"{'es' if n_suffixes != 1 else ''})")
+    elif n_shared_ext >= MIN_SHARED_EXTENSION_RENAMES:
+        verdict = "TRUE_ENCRYPTION"
+        reason = (f"{n_shared_ext} files renamed onto '{shared_ext}', "
+                  f"replacing whatever extension they had")
     elif corroborating_axes >= MIN_CORROBORATING_AXES:
         verdict = "TRUE_ENCRYPTION"
         reason = (f"corroborating evidence on {corroborating_axes} axes "
@@ -696,6 +815,7 @@ RESULT_FIELDNAMES = [
     "append_renames", "distinct_rename_suffixes",
     "ransom_note_dirs", "ransom_note_name", "ransom_note_candidates",
     "ransom_note_explicit", "corroborating_axes",
+    "shared_extension_renames", "shared_extension",
 ]
 
 
@@ -754,9 +874,15 @@ def print_single(result):
     print(f"   distinct new suffixes   : {result.get('distinct_rename_suffixes', 0)}"
           f"  (1 = one shared family extension; many = a per-file hash)")
 
+    n_shared = result.get("shared_extension_renames", 0)
+    if n_shared:
+        print(f"   renamed onto one extension : {n_shared} files -> "
+              f"'{result.get('shared_extension','')}'  "
+              f"(threshold {MIN_SHARED_EXTENSION_RENAMES})")
+
     axes = result.get("corroborating_axes", 0)
     print(f"\n[Corroboration]")
-    print(f"   evidence axes showing anything : {axes}/3"
+    print(f"   axes with at least {MIN_EVENTS_PER_AXIS} events : {axes}/4"
           f"  (threshold {MIN_CORROBORATING_AXES} when none is conclusive alone)")
 
     note_dirs = result.get("ransom_note_dirs", 0)
@@ -807,7 +933,7 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
         return results
 
     header = (f"{'task':<7} {'verdict':<22} {'family':<16} {'calls':>7} "
-              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5} {'note':>6} {'axes':>5}")
+              f"{'DESTROYED':>10} {'read':>6} {'appendRen':>10} {'sfx':>5} {'note':>6} {'sharedX':>7} {'axes':>5}")
     print(header)
     print("-" * len(header))
     for r in results:
@@ -818,6 +944,7 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
               f"{r.get('append_renames', 0):>10} "
               f"{r.get('distinct_rename_suffixes', 0):>5} "
               f"{r.get('ransom_note_dirs', 0):>6} "
+              f"{r.get('shared_extension_renames', 0):>7} "
               f"{r.get('corroborating_axes', 0):>5}")
 
     counts = defaultdict(int)

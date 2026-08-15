@@ -1,7 +1,7 @@
 task_id,label,label_as_given,batch,note
 73,N,C,1,"old scheme C: console or other activity, encryption unclear"
 74,A,A,1,
-75,N,B,1,old scheme B: little activity
+75,A2,B,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 76,N,C,1,"old scheme C: console or other activity, encryption unclear"
 77,A,A,1,
 78,N,C,1,"old scheme C: console or other activity, encryption unclear"
@@ -26,8 +26,8 @@ task_id,label,label_as_given,batch,note
 97,A,A,1,
 98,A,A,1,
 99,N,B,1,old scheme B: little activity
-100,A,A,1,
-101,A,A,1,
+100,F,A,1,corrected: screen showed encryption but nothing was recorded
+101,F,A,1,corrected: screen showed encryption but nothing was recorded
 102,A,A,1,
 103,A,A,1,
 104,A,A,1,
@@ -53,8 +53,8 @@ task_id,label,label_as_given,batch,note
 124,A,A,1,
 125,N,B,1,old scheme B: little activity
 126,A,A,1,
-127,N,C,1,"old scheme C: console or other activity, encryption unclear"
-128,N,C,1,"old scheme C: console or other activity, encryption unclear"
+127,A2,C,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
+128,A2,C,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 129,A,A,1,
 130,A,A,1,
 131,A,A,1,
@@ -63,34 +63,34 @@ task_id,label,label_as_given,batch,note
 134,A,A,1,
 135,N,B,1,old scheme B: little activity
 136,A,A,1,
-138,N,C,1,"old scheme C: console or other activity, encryption unclear"
+138,A2,C,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 139,A,A,1,
 140,A,A,1,
-141,N,C,1,"old scheme C: console or other activity, encryption unclear"
+141,A2,C,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 142,A,A,1,
 143,A,A,1,
 144,A,A,1,
 145,A,A,1,
 146,A,A,1,
-147,N,B,1,old scheme B: little activity
+147,A2,B,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 148,N,B,1,old scheme B: little activity
 149,N,B,1,old scheme B: little activity
 150,N,B,1,old scheme B: little activity
-151,N,C,1,"old scheme C: console or other activity, encryption unclear"
+151,A2,C,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 152,A,A,1,
 154,N,B,1,old scheme B: little activity
 155,N,B,1,old scheme B: little activity
 156,A,A,1,
 157,A,A,1,
 158,A,A,1,
-201,N,C,1,"old scheme C: console or other activity, encryption unclear"
+201,A2,C,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 202,A,A,1,
 203,A,A,1,
 204,N,B,1,old scheme B: little activity
-205,N,B,1,old scheme B: little activity
+205,A2,B,1,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 206,N,B,1,old scheme B: little activity
 207,A,A,1,
-208,A,A,1,
+208,F,A,1,corrected: screen showed encryption but nothing was recorded
 209,A,A,1,
 210,A,A,1,
 211,A,A,1,
@@ -102,14 +102,14 @@ task_id,label,label_as_given,batch,note
 217,A,A,1,
 218,A,A,2,
 219,N,B,2,old scheme B
-220,N,C,2,old scheme C
+220,A2,C,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 221,A,A,2,
-222,N,B,2,old scheme B
-223,N,C,2,old scheme C
+222,A2,B,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
+223,A2,C,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 224,N,B,2,old scheme B
 225,N,B,2,old scheme B
 226,A,A,2,
-227,N,B,2,old scheme B
+227,A2,B,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 228,F,F,2,analysis did not stand up
 229,F,F,2,analysis did not stand up
 230,F,F,2,analysis did not stand up
@@ -138,7 +138,7 @@ task_id,label,label_as_given,batch,note
 253,A,A,2,
 254,A,A,2,
 255,A,A,2,
-256,N,B,2,old scheme B
+256,A2,B,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 257,A2,A,2,"AMBIGUOUS: recorded as 'C, same as 244'; treated as A2 -- check"
 258,A,A,2,
 259,A2,A,2,"confirmed from summary, not visible on screen"
@@ -150,7 +150,7 @@ task_id,label,label_as_given,batch,note
 265,N,B,2,old scheme B
 266,A2,A,2,"confirmed from summary, not visible on screen"
 267,A,A,2,
-268,N,B,2,old scheme B
+268,A2,B,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 269,A2,A,2,"confirmed from summary, not visible on screen"
 270,A,A,2,
 271,N,B,2,old scheme B
@@ -174,9 +174,9 @@ task_id,label,label_as_given,batch,note
 289,N,B,2,old scheme B
 290,A,A,2,
 291,A,A,2,
-292,N,B,2,old scheme B
+292,A2,B,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 293,A,A,2,
-294,N,B,2,old scheme B
+294,A2,B,2,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 295,A,A,2,
 296,A,A,2,
 297,A,A,2,
@@ -205,7 +205,7 @@ task_id,label,label_as_given,batch,note
 320,F,F,3,
 321,F,F,3,
 322,A2,A2,3,
-323,A,A,3,
+323,F,A,3,corrected: screen showed encryption but nothing was recorded
 324,A,A,3,
 325,N,N,3,
 326,A2,A2,3,
@@ -220,7 +220,7 @@ task_id,label,label_as_given,batch,note
 335,F,F,3,
 350,N,N,3,
 351,F,F,3,
-352,N,N,3,"labelled N by hand; the code found 42 and 48 append-renames respectively, so this is probably encryption the manual pass missed"
+352,A2,N,3,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 353,N,N,3,
 354,N,N,3,
 355,N,N,3,
@@ -250,7 +250,7 @@ task_id,label,label_as_given,batch,note
 379,F,F,3,
 380,F,F,3,
 381,F,F,3,
-382,A2,A2,3,
+382,N,A2,3,"corrected: Zeppelin, self-copy as explorer.exe and network share probing but no file encryption; notepad launch was mistaken for a ransom note"
 383,N,N,3,
 384,F,F,3,
 410,F,F,3,
@@ -284,7 +284,7 @@ task_id,label,label_as_given,batch,note
 439,N,N,3,
 440,N,N,3,
 441,N,N,3,
-442,A,A,3,
+442,F,A,3,corrected: screen showed encryption but nothing was recorded
 443,A2,A2,3,
 444,A2,A2,3,
 445,N,N,3,
@@ -308,7 +308,7 @@ task_id,label,label_as_given,batch,note
 463,N,N,3,
 464,A,A,3,
 465,N,N,3,
-466,N,N,3,"labelled N by hand; the code found 42 and 48 append-renames respectively, so this is probably encryption the manual pass missed"
+466,A2,N,3,corrected: code found note/append/decoy evidence the old B/C labelling could not see
 467,A,A,3,
 469,N,N,3,
 470,N,N,3,

@@ -222,6 +222,121 @@ def chain_features(behavior):
     return out
 
 
+# Ransomware has to leave the machine usable. A victim who cannot boot
+# cannot read the note, find the wallet, or pay, so families routinely
+# restrict themselves to documents and media and step around executables,
+# drivers and the Windows directory. That restraint is a relationship
+# between what a file is and whether it was destroyed, and it is invisible
+# to a count of how many extensions were touched.
+EXT_GROUPS = {
+    "document": {"doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "rtf",
+                 "odt", "ods", "txt", "csv", "xml", "json", "md"},
+    "media": {"jpg", "jpeg", "png", "gif", "bmp", "tif", "tiff", "svg",
+              "mp3", "mp4", "avi", "mkv", "mov", "wav", "webm", "webp"},
+    "archive": {"zip", "rar", "7z", "tar", "gz", "bz2", "iso", "cab"},
+    "database": {"db", "sql", "mdb", "accdb", "sqlite", "bak", "dbf"},
+    "code": {"c", "cpp", "h", "py", "java", "js", "cs", "php", "rb", "go"},
+    "executable": {"exe", "dll", "sys", "drv", "ocx", "cpl", "scr", "msi",
+                   "com", "bat", "cmd", "ps1", "efi"},
+}
+EXT_TO_GROUP = {e: g for g, exts in EXT_GROUPS.items() for e in exts}
+
+# Paths a family sparing the machine would read but not wreck.
+SYSTEM_MARKERS = ("\\windows\\", "\\program files", "\\programdata\\",
+                  "\\system32\\", "\\syswow64\\")
+
+
+def _ext_of(path):
+    name = path.replace("/", "\\").split("\\")[-1]
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+def selectivity_features(behavior):
+    """
+    Whether destruction tracked what the file was.
+
+    Counting extensions says how widely a run ranged. It does not say whether
+    the run chose. A disk cleaner and a wiper destroy whatever they find, so
+    their destruction rate is flat across file types. A family that means to
+    be paid destroys documents and leaves the executables that let the
+    machine boot, and its rate varies sharply by type.
+
+    Measured as rates per group and the spread between them, so none of it
+    grows with how many files were involved.
+
+    Only the source side of a rename is read: the extension a family appends
+    to its output is already used by the verdict logic, and counting it here
+    would make the feature partly a restatement of the label.
+    """
+    touched = Counter()
+    destroyed = Counter()
+    sys_touched = sys_destroyed = user_touched = user_destroyed = 0
+
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        kind = event.get("event")
+        data = event.get("data", {}) or {}
+        path = data.get("file") or data.get("from")
+        if not path or not kind:
+            continue
+
+        group = EXT_TO_GROUP.get(_ext_of(path), "other")
+        touched[group] += 1
+        low = path.lower()
+        in_system = any(m in low for m in SYSTEM_MARKERS)
+        if in_system:
+            sys_touched += 1
+        else:
+            user_touched += 1
+        if kind in DESTRUCTIVE:
+            destroyed[group] += 1
+            if in_system:
+                sys_destroyed += 1
+            else:
+                user_destroyed += 1
+
+    if not touched:
+        return {k: "" for k in (
+            "sel_rate_document", "sel_rate_media", "sel_rate_executable",
+            "sel_rate_spread", "sel_doc_minus_exe",
+            "sel_destroyed_exe_share", "sel_destroyed_doc_share",
+            "sel_system_spared", "sel_system_touch_share")}
+
+    out = {}
+    rates = {}
+    for group in ("document", "media", "executable", "archive", "database"):
+        seen = touched.get(group, 0)
+        if seen >= 3:
+            rates[group] = destroyed.get(group, 0) / seen
+    for group in ("document", "media", "executable"):
+        out[f"sel_rate_{group}"] = round(rates[group], 4) if group in rates else ""
+
+    # A flat profile means the run did not choose. A wide one means it did.
+    out["sel_rate_spread"] = round(max(rates.values()) - min(rates.values()), 4) \
+        if len(rates) >= 2 else ""
+    out["sel_doc_minus_exe"] = round(rates["document"] - rates["executable"], 4) \
+        if "document" in rates and "executable" in rates else ""
+
+    total_destroyed = sum(destroyed.values())
+    if total_destroyed:
+        out["sel_destroyed_exe_share"] = round(
+            destroyed.get("executable", 0) / total_destroyed, 4)
+        out["sel_destroyed_doc_share"] = round(
+            (destroyed.get("document", 0) + destroyed.get("media", 0))
+            / total_destroyed, 4)
+    else:
+        out["sel_destroyed_exe_share"] = ""
+        out["sel_destroyed_doc_share"] = ""
+
+    # Reached into the system directories and left them alone, while
+    # destroying elsewhere.
+    out["sel_system_spared"] = int(
+        sys_touched >= 5 and sys_destroyed == 0 and user_destroyed > 0)
+    out["sel_system_touch_share"] = round(sys_touched / (sys_touched + user_touched), 4)
+    return out
+
+
 def extension_features(behavior):
     """
     How indiscriminate the file selection was, over every path touched.
@@ -260,6 +375,7 @@ def process_one(path):
     row.update(repetitiveness(stream))
     row.update(chain_features(behavior))
     row.update(extension_features(behavior))
+    row.update(selectivity_features(behavior))
     return row
 
 

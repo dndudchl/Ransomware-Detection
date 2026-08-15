@@ -56,7 +56,36 @@
  */
 
 #ifndef METHOD
-#define METHOD 2        /* 1 in-place, 2 copy+delete, 3 rename, 4 many-to-one, 5 drop */
+/*  1 overwrite in place          6 read, encrypt, write, delete original
+ *  2 copy then delete            7 overwrite with random, then delete
+ *  3 rename only                 8 copy, keep the original
+ *  4 many files into one         9 move to another directory
+ *  5 write without reading                                              */
+#define METHOD 2
+#endif
+#ifndef RENAME_MODE
+/* 0 keeps the original name and appends: report.docx -> report.docx.matrix
+ * 1 discards it: report.docx -> Kf3Qz9x2.[processed]
+ *
+ * The second is not a variation for its own sake. One family in the set
+ * renamed 4,908 files that way and registered nothing on the append check,
+ * because that check asks whether the new path starts with the old one. The
+ * extension axis was added to catch it. This is the control for that axis. */
+#define RENAME_MODE 0
+#endif
+#ifndef BATCH
+/* 1 reads every file before writing any of them. Correlating writes against
+ * crypto calls within a time window assumes the two are interleaved; doing
+ * all the reading first and all the writing second breaks that assumption
+ * without changing a single count. */
+#define BATCH 0
+#endif
+#ifndef GENERATE
+/* Create this many files of its own and work on those instead of the decoys.
+ * Volume can then be raised past what the guest holds, and raised without
+ * the confound that touching more decoys also means touching more kinds of
+ * file in more directories. */
+#define GENERATE 0
 #endif
 #ifndef SCOPE
 #define SCOPE 1         /* 1 user decoys, 2 Program Files, 3 walk C:\ */
@@ -94,6 +123,9 @@
 #define NEW_EXTENSION  ".matrix"
 #define NOTE_NAME      "RESTORE_INSTRUCTIONS.txt"
 #define WINDOW_MS      480000   /* leave headroom inside the 600s analysis */
+#define GEN_DIR_NAME   "matrix_generated"
+#define GEN_FILE_BYTES 32768
+#define REPLACE_EXT    ".[processed]"
 
 static const char *NOTE_TEXT =
     "This folder was processed by a behaviour matrix test.\r\n"
@@ -235,6 +267,128 @@ static int write_file(const char *path, const BYTE *buf, DWORD len)
     return n == len;
 }
 
+/* Where a transformed file ends up, under whichever naming rule is built in. */
+static void target_name(const char *source, char *out, size_t n)
+{
+#if RENAME_MODE == 1
+    /* Nothing of the original survives except the directory it was in. */
+    static unsigned int seed = 0;
+    if (!seed) seed = GetTickCount();
+    char stem[24];
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (int i = 0; i < 16; i++) {
+        seed = seed * 1103515245u + 12345u;
+        stem[i] = alphabet[(seed >> 16) % (sizeof(alphabet) - 1)];
+    }
+    stem[16] = '\0';
+
+    char dir[MAX_PATH];
+    strncpy(dir, source, MAX_PATH - 1);
+    dir[MAX_PATH - 1] = '\0';
+    char *slash = strrchr(dir, '\\');
+    if (slash) *slash = '\0'; else strcpy(dir, ".");
+    snprintf(out, n, "%s\\%s%s", dir, stem, REPLACE_EXT);
+#else
+    snprintf(out, n, "%s%s", source, NEW_EXTENSION);
+#endif
+}
+
+#if METHOD == 6
+/* Real Windows cryptography, so that a feature looking for crypto calls has
+ * some to find.
+ *
+ * This exists to be compared against METHOD 2, which performs the identical
+ * sequence of file operations and skips only this step. Any feature that
+ * separates the two is seeing the encryption; any feature that does not is
+ * seeing the file operations and calling them encryption. On the ransomware
+ * set that question could not be asked, because there was no pair of runs
+ * that differed in this and nothing else. */
+static int encrypt_buffer(BYTE *buf, DWORD *len, DWORD capacity)
+{
+    HCRYPTPROV provider = 0;
+    HCRYPTHASH hash = 0;
+    HCRYPTKEY key = 0;
+    int ok = 0;
+
+    if (!CryptAcquireContextA(&provider, NULL, NULL, PROV_RSA_AES,
+                              CRYPT_VERIFYCONTEXT))
+        return 0;
+    if (CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+        const char *secret = "matrix-experiment-key";
+        if (CryptHashData(hash, (const BYTE *)secret, (DWORD)strlen(secret), 0) &&
+            CryptDeriveKey(provider, CALG_AES_256, hash, 0, &key)) {
+            DWORD n = *len;
+            if (CryptEncrypt(key, 0, TRUE, 0, buf, &n, capacity)) {
+                *len = n;
+                ok = 1;
+            }
+            CryptDestroyKey(key);
+        }
+        CryptDestroyHash(hash);
+    }
+    CryptReleaseContext(provider, 0);
+    return ok;
+}
+#endif
+
+#if METHOD == 7
+/* Overwrite with random bytes and remove: what sdelete does, and what a
+ * wiper does. Contents are destroyed as thoroughly as encryption destroys
+ * them, and no cryptographic call is made anywhere. */
+static void fill_random(BYTE *buf, DWORD len)
+{
+    static unsigned int seed = 0;
+    if (!seed) seed = GetTickCount() ^ 0x5bd1e995u;
+    for (DWORD i = 0; i < len; i++) {
+        seed = seed * 1103515245u + 12345u;
+        buf[i] = (BYTE)(seed >> 16);
+    }
+}
+#endif
+
+#if GENERATE > 0
+/* Work on files this program made, rather than the decoys.
+ *
+ * Volume and variety move together among the decoys -- reaching more files
+ * means reaching more directories and more extensions -- so a feature that
+ * responds to one cannot be told from a feature that responds to the other.
+ * Files generated here are uniform, in one directory, so raising the count
+ * raises nothing else. */
+static void generate_files(void)
+{
+    char dir[MAX_PATH];
+    if (!ExpandEnvironmentStringsA("%USERPROFILE%\\Documents\\" GEN_DIR_NAME,
+                                    dir, sizeof(dir)))
+        return;
+    CreateDirectoryA(dir, NULL);
+
+    BYTE *block = (BYTE *)malloc(GEN_FILE_BYTES);
+    if (!block) return;
+    for (int i = 0; i < GEN_FILE_BYTES; i++)
+        block[i] = (BYTE)('A' + (i % 26));
+
+    int made = 0;
+    for (int i = 0; i < GENERATE && g_file_count < MAX_FILES; i++) {
+        char path[MAX_PATH];
+        snprintf(path, sizeof(path), "%s\\gen_%05d.dat", dir, i);
+        HANDLE h = CreateFileA(path, GENERIC_WRITE, 0, NULL,
+                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        DWORD n = 0;
+        WriteFile(h, block, GEN_FILE_BYTES, &n, NULL);
+        CloseHandle(h);
+        strncpy(g_files[g_file_count], path, MAX_PATH - 1);
+        g_files[g_file_count][MAX_PATH - 1] = '\0';
+        g_file_count++;
+        made++;
+    }
+    free(block);
+    remember_dir(dir);
+    say("generated %d files of its own", made);
+}
+#endif
+
 static void run_command(const char *command)
 {
     STARTUPINFOA si; PROCESS_INFORMATION pi;
@@ -295,11 +449,17 @@ static void do_effects(void)
 
 int main(void)
 {
-    say("matrix: method=%d scope=%d limit=%d filter=%d timing=%d effects=%d files=%d",
-        METHOD, SCOPE, LIMIT, FILTER, TIMING, EFFECTS, FILES_ONLY);
+    say("matrix: method=%d scope=%d limit=%d filter=%d timing=%d effects=%d "
+        "files=%d rename=%d batch=%d generate=%d",
+        METHOD, SCOPE, LIMIT, FILTER, TIMING, EFFECTS, FILES_ONLY,
+        RENAME_MODE, BATCH, GENERATE);
     Sleep(3000);
 
+#if GENERATE > 0
+    generate_files();
+#else
     collect();
+#endif
 #if LIMIT > 0
     if (g_file_count > LIMIT) g_file_count = LIMIT;
 #endif
@@ -336,15 +496,39 @@ int main(void)
     if (g_file_count > 0) per_file_pause = WINDOW_MS / (DWORD)g_file_count;
 #endif
 
+#if BATCH == 1
+    /* Everything is read first, then everything is written. The counts are
+     * unchanged; only the interleaving is gone. */
+    {
+        int scanned = 0;
+        for (int i = 0; i < g_file_count; i++)
+            if (read_file(g_files[i], buf, READ_CHUNK)) scanned++;
+        say("batch: read %d files before writing any", scanned);
+        did_read = scanned;
+    }
+#endif
+
     for (int i = 0; i < g_file_count; i++) {
         const char *path = g_files[i];
 
 #if METHOD == 5
         /* Writes files it never read: a dropper, or an installer. */
         char dropped[MAX_PATH];
-        snprintf(dropped, sizeof(dropped), "%s%s", path, NEW_EXTENSION);
+        target_name(path, dropped, sizeof(dropped));
         if (write_file(dropped, (const BYTE *)NOTE_TEXT,
                        (DWORD)strlen(NOTE_TEXT))) did_write++;
+#elif METHOD == 9
+        {
+            char dest_dir[MAX_PATH], dest[MAX_PATH];
+            if (ExpandEnvironmentStringsA("%USERPROFILE%\\Desktop\\matrix_moved",
+                                           dest_dir, sizeof(dest_dir))) {
+                CreateDirectoryA(dest_dir, NULL);
+                const char *base = strrchr(path, '\\');
+                snprintf(dest, sizeof(dest), "%s\\%s", dest_dir,
+                         base ? base + 1 : path);
+                if (MoveFileA(path, dest)) did_move++;
+            }
+        }
 #else
         DWORD len = read_file(path, buf, READ_CHUNK);
         if (!len) continue;
@@ -359,7 +543,7 @@ int main(void)
         /* A replacement beside the original, then the original removed. */
         {
             char replacement[MAX_PATH];
-            snprintf(replacement, sizeof(replacement), "%s%s", path, NEW_EXTENSION);
+            target_name(path, replacement, sizeof(replacement));
             if (write_file(replacement, buf, len)) {
                 did_write++;
                 if (DeleteFileA(path)) did_delete++;
@@ -371,7 +555,7 @@ int main(void)
          * rename utility, or a script marking files as processed. */
         {
             char renamed[MAX_PATH];
-            snprintf(renamed, sizeof(renamed), "%s%s", path, NEW_EXTENSION);
+            target_name(path, renamed, sizeof(renamed));
             if (MoveFileA(path, renamed)) did_move++;
         }
 
@@ -381,6 +565,41 @@ int main(void)
             WriteFile(out, buf, len, &n, NULL);
             if (DeleteFileA(path)) did_delete++;
         }
+
+#elif METHOD == 6
+        /* The same shape as METHOD 2, with the contents encrypted on the way
+         * through. The pair is the experiment. */
+        {
+            DWORD out_len = len;
+            if (!encrypt_buffer(buf, &out_len, READ_CHUNK)) out_len = len;
+            char replacement[MAX_PATH];
+            target_name(path, replacement, sizeof(replacement));
+            if (write_file(replacement, buf, out_len)) {
+                did_write++;
+                if (DeleteFileA(path)) did_delete++;
+            }
+        }
+
+#elif METHOD == 7
+        /* Contents replaced with random bytes in place, then removed. As
+         * destructive as encryption, with no cryptography anywhere. */
+        {
+            fill_random(buf, len);
+            if (write_file(path, buf, len)) {
+                did_write++;
+                if (DeleteFileA(path)) did_delete++;
+            }
+        }
+
+#elif METHOD == 8
+        /* A copy beside the original, which stays. Reads and writes the same
+         * as METHOD 2 and destroys nothing: the non-destructive control. */
+        {
+            char copy_path[MAX_PATH];
+            target_name(path, copy_path, sizeof(copy_path));
+            if (write_file(copy_path, buf, len)) did_write++;
+        }
+
 #endif
 #endif /* METHOD == 5 */
 

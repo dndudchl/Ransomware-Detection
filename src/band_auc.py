@@ -43,6 +43,10 @@ BOUNDED = {
     "api_branching",
     "chain_read_only", "chain_write_only", "chain_read_write",
     "chain_read_destroy", "chain_write_destroy", "chain_full",
+    "sel_rate_document", "sel_rate_media", "sel_rate_executable",
+    "sel_rate_spread", "sel_doc_minus_exe",
+    "sel_destroyed_exe_share", "sel_destroyed_doc_share",
+    "sel_system_touch_share",
 }
 
 
@@ -80,6 +84,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--relational", required=True)
     parser.add_argument("--results", required=True)
+    parser.add_argument("--band-on", default="n_calls",
+                         help="Column the bands are formed from. n_calls holds API "
+                              "volume constant but not file activity -- a run can make "
+                              "fifty thousand registry calls without touching a file. "
+                              "Banding on n_paths asks which features survive when both "
+                              "groups handled a comparable number of files.")
     parser.add_argument("--min-band", type=int, default=25,
                          help="Skip a band with fewer than this many runs on either side")
     parser.add_argument("--edges", type=float, nargs="+", default=None,

@@ -314,6 +314,151 @@ int main(void)
              "cmd.exe /c forfiles /p \"%s\" /s /m *.* /d -0 /c \"cmd /c del @path\"", docs);
     run(cmd, 300000);
 
+#elif TOOL == 19
+    /* Opening documents in whatever is registered to handle them. The decoy
+     * set is real files -- pdf, docx, xlsx, pptx -- so this is a person
+     * reading their own documents, and it produces exactly the reads a
+     * family produces before it encrypts them. */
+    say("open documents in their registered applications");
+    collect_decoys();
+    say("  %d files found", g_count);
+    {
+        int opened = 0;
+        for (int i = 0; i < g_count && opened < 12; i++) {
+            const char *e = strrchr(g_files[i], '.');
+            if (!e) continue;
+            if (_stricmp(e, ".pdf") && _stricmp(e, ".docx") &&
+                _stricmp(e, ".xlsx") && _stricmp(e, ".pptx")) continue;
+            snprintf(cmd, sizeof(cmd), "cmd.exe /c start \"\" \"%s\"", g_files[i]);
+            run(cmd, 15000);
+            opened++;
+            Sleep(8000);
+        }
+        say("  opened %d, letting them settle", opened);
+        Sleep(30000);
+    }
+    /* The same cleanup a family performs for the opposite reason: an open
+     * document holds a lock, and the lock has to go before the file can be
+     * touched. Identical API trail, entirely different purpose. */
+    run("cmd.exe /c taskkill /f /im AcroRd32.exe /im Acrobat.exe /im WINWORD.EXE "
+        "/im EXCEL.EXE /im POWERPNT.EXE /t", 60000);
+
+#elif TOOL == 20
+    /* Acrobat by path rather than by association, since Adobe is present in
+     * 694 of the ransomware analyses and is the largest thing installed. */
+    say("Acrobat on the decoy PDFs");
+    collect_decoys();
+    {
+        const char *acrobat[] = {
+            "C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\Acrobat.exe",
+            "C:\\Program Files (x86)\\Adobe\\Acrobat Reader DC\\Reader\\AcroRd32.exe",
+            NULL };
+        int opened = 0;
+        for (int i = 0; i < g_count && opened < 8; i++) {
+            const char *e = strrchr(g_files[i], '.');
+            if (!e || _stricmp(e, ".pdf")) continue;
+            for (int a = 0; acrobat[a]; a++) {
+                if (GetFileAttributesA(acrobat[a]) == INVALID_FILE_ATTRIBUTES) continue;
+                snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\"", acrobat[a], g_files[i]);
+                run(cmd, 10000);
+                opened++;
+                break;
+            }
+            Sleep(6000);
+        }
+        say("  opened %d pdfs", opened);
+        Sleep(30000);
+    }
+    run("cmd.exe /c taskkill /f /im Acrobat.exe /im AcroRd32.exe /im AcroCEF.exe /t", 60000);
+
+#elif TOOL == 21
+    /* Images and media through their handlers. */
+    say("view images and play media");
+    collect_decoys();
+    {
+        int opened = 0;
+        for (int i = 0; i < g_count && opened < 10; i++) {
+            const char *e = strrchr(g_files[i], '.');
+            if (!e) continue;
+            if (_stricmp(e, ".jpg") && _stricmp(e, ".png") && _stricmp(e, ".bmp") &&
+                _stricmp(e, ".mp3") && _stricmp(e, ".mp4")) continue;
+            snprintf(cmd, sizeof(cmd), "cmd.exe /c start \"\" \"%s\"", g_files[i]);
+            run(cmd, 12000);
+            opened++;
+            Sleep(5000);
+        }
+        say("  opened %d", opened);
+        Sleep(25000);
+    }
+    run("cmd.exe /c taskkill /f /im wmplayer.exe /im Microsoft.Photos.exe "
+        "/im dllhost.exe /im PhotosApp.exe /t", 60000);
+
+#elif TOOL == 22
+    /* A working session: open a few things, leave them a while, close them,
+     * open a few more. Repeated reads of the same paths, interleaved with
+     * application startup, spread across minutes. */
+    say("a document working session");
+    collect_decoys();
+    for (int round = 0; round < 3; round++) {
+        int opened = 0;
+        for (int i = round * 4; i < g_count && opened < 4; i++) {
+            const char *e = strrchr(g_files[i], '.');
+            if (!e) continue;
+            if (_stricmp(e, ".pdf") && _stricmp(e, ".docx") &&
+                _stricmp(e, ".xlsx") && _stricmp(e, ".txt")) continue;
+            snprintf(cmd, sizeof(cmd), "cmd.exe /c start \"\" \"%s\"", g_files[i]);
+            run(cmd, 12000);
+            opened++;
+            Sleep(5000);
+        }
+        say("  round %d: opened %d", round + 1, opened);
+        Sleep(40000);
+        run("cmd.exe /c taskkill /f /im AcroRd32.exe /im Acrobat.exe /im WINWORD.EXE "
+            "/im EXCEL.EXE /im notepad.exe /t", 45000);
+        Sleep(5000);
+    }
+
+#elif TOOL == 23
+    /* Killing the applications that hold file locks, and nothing else.
+     * A family does this so it can encrypt what they were holding; a backup
+     * tool does it so it can copy a consistent snapshot. The process trail
+     * is the same either way, which is the point of running it on its own. */
+    say("release file locks by force, and stop there");
+    run("cmd.exe /c start \"\" notepad.exe", 10000);
+    run("cmd.exe /c start \"\" mspaint.exe", 10000);
+    run("cmd.exe /c start \"\" \"" SEVENZIP "\"", 10000);
+    Sleep(20000);
+    run("cmd.exe /c taskkill /f /im notepad.exe /im mspaint.exe /im 7zFM.exe "
+        "/im WINWORD.EXE /im EXCEL.EXE /im POWERPNT.EXE /im Acrobat.exe "
+        "/im AcroRd32.exe /im outlook.exe /im sqlservr.exe /t", 90000);
+    run("cmd.exe /c net stop MSSQLSERVER /y", 60000);
+    run("cmd.exe /c net stop VSS /y", 60000);
+
+#elif TOOL == 24
+    /* Internet Explorer and Media Player rendering local files, which is
+     * ordinary use of two programs the guest has installed. */
+    say("Internet Explorer and Media Player on local files");
+    collect_decoys();
+    {
+        int opened = 0;
+        for (int i = 0; i < g_count && opened < 6; i++) {
+            const char *e = strrchr(g_files[i], '.');
+            if (!e) continue;
+            if (_stricmp(e, ".txt") && _stricmp(e, ".csv") && _stricmp(e, ".pdf"))
+                continue;
+            snprintf(cmd, sizeof(cmd),
+                     "\"C:\\Program Files\\Internet Explorer\\iexplore.exe\" \"file:///%s\"",
+                     g_files[i]);
+            run(cmd, 10000);
+            opened++;
+            Sleep(6000);
+        }
+        say("  opened %d in IE", opened);
+    }
+    run("\"C:\\Program Files\\Windows Media Player\\wmplayer.exe\"", 15000);
+    Sleep(25000);
+    run("cmd.exe /c taskkill /f /im iexplore.exe /im wmplayer.exe /t", 60000);
+
 #else
 #error "unknown TOOL"
 #endif

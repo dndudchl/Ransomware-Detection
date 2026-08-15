@@ -119,7 +119,7 @@ def main():
             rows.append(r)
 
     features = [c for c in rows[0]
-                if c not in ("task_id", "_enc", "_error", "n_calls")]
+                if c not in ("task_id", "_enc", "_error", args.band_on)]
 
     print(f"{len(rows)} runs with a verdict "
           f"({sum(r['_enc'] for r in rows)} encrypting)\n")
@@ -128,7 +128,8 @@ def main():
     per_band = defaultdict(dict)
     band_sizes = {}
     for lo, hi in bands:
-        band = [r for r in rows if (c := num(r, "n_calls")) is not None and lo <= c < hi]
+        band = [r for r in rows
+                if (c := num(r, args.band_on)) is not None and lo <= c < hi]
         enc = [r for r in band if r["_enc"]]
         non = [r for r in band if not r["_enc"]]
         band_sizes[(lo, hi)] = (len(enc), len(non))

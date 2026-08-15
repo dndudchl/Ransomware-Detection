@@ -58,6 +58,21 @@ build 17 tool_apps         "notepad, mspaint, 7zFM, calc"
 build 18 tool_backup       "robocopy then prune -- read, write and delete"
 
 echo
+echo "opening the decoy documents in the applications installed to handle them"
+echo "  each ends with taskkill, the same call a family makes to release the"
+echo "  locks those applications hold -- so the process trail matches and only"
+echo "  the reason differs"
+build 19 tool_open_docs   "open pdf, docx, xlsx through their handlers"
+build 20 tool_acrobat     "Acrobat by path on the decoy PDFs"
+build 21 tool_media       "images and media through their handlers"
+build 22 tool_session     "three rounds of open, read, close"
+build 24 tool_ie_wmp      "Internet Explorer and Media Player on local files"
+
+echo
+echo "process termination on its own"
+build 23 tool_taskkill    "kill lock holders and stop services, nothing else"
+
+echo
 n=$(ls -1 "$OUT"/tool_*.exe 2>/dev/null | wc -l)
 echo "built $n tool wrappers into $OUT"
 echo

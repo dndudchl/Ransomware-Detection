@@ -27,7 +27,13 @@ import csv
 import argparse
 from collections import defaultdict
 
-BANDS = [(500, 5_000), (5_000, 25_000), (25_000, 75_000), (75_000, 10**9)]
+# Defaults suit n_calls. Banding on anything else needs its own edges:
+# n_paths runs two orders of magnitude smaller, so these would put every run
+# in one band and the comparison would report nothing.
+DEFAULT_BANDS = {
+    "n_calls": [500, 5_000, 25_000, 75_000],
+    "n_paths": [1, 10, 100, 1_000],
+}
 
 # Features bounded by construction: a share, a ratio, a fraction. These
 # cannot rise merely because the run was longer.
@@ -76,7 +82,17 @@ def main():
     parser.add_argument("--results", required=True)
     parser.add_argument("--min-band", type=int, default=25,
                          help="Skip a band with fewer than this many runs on either side")
+    parser.add_argument("--edges", type=float, nargs="+", default=None,
+                         help="Lower edge of each band. Defaults are set for n_calls "
+                              "and n_paths; any other column needs them given.")
     args = parser.parse_args()
+
+    edges = args.edges or DEFAULT_BANDS.get(args.band_on)
+    if not edges:
+        print(f"[!] no default bands for '{args.band_on}'. Pass --edges.")
+        return
+    bands = [(edges[i], edges[i + 1] if i + 1 < len(edges) else 10**12)
+             for i in range(len(edges))]
 
     verdict = {}
     with open(args.results, newline="") as f:
@@ -101,7 +117,7 @@ def main():
     # Per-band AUC, plus a note of how consistent the direction is.
     per_band = defaultdict(dict)
     band_sizes = {}
-    for lo, hi in BANDS:
+    for lo, hi in bands:
         band = [r for r in rows if (c := num(r, "n_calls")) is not None and lo <= c < hi]
         enc = [r for r in band if r["_enc"]]
         non = [r for r in band if not r["_enc"]]
@@ -113,9 +129,20 @@ def main():
             if a is not None:
                 per_band[c][(lo, hi)] = a
 
-    label = {b: (f"{b[0]//1000}k-{b[1]//1000}k" if b[1] < 10**9
-                 else f"{b[0]//1000}k+") for b in BANDS}
-    usable = [b for b in BANDS if b in per_band[features[0]]] if features else []
+    def name(v):
+        v = int(v)
+        return f"{v//1000}k" if v >= 1000 else str(v)
+    label = {b: (f"{name(b[0])}-{name(b[1])}" if b[1] < 10**12
+                 else f"{name(b[0])}+") for b in bands}
+    usable = [b for b in bands
+              if any(b in per_band[c] for c in features)] if features else []
+    if not usable:
+        print(f"[!] no band on '{args.band_on}' had at least {args.min_band} runs "
+              f"on both sides. Sizes were:")
+        for b in bands:
+            print(f"      {label[b]:>12}  encrypting {band_sizes[b][0]:>5}, "
+                  f"other {band_sizes[b][1]:>5}")
+        return
 
     header = f"{'feature':<26}" + "".join(f"{label[b]:>10}" for b in usable) + f"{'worst':>9}  "
     print("Bands used: " + ", ".join(

@@ -362,6 +362,193 @@ def extension_features(behavior):
             "ext_top_share": round(exts.most_common(1)[0][1] / total, 4)}
 
 
+# Each of these is something ordinary software does. Enumerating a
+# directory is what a backup tool does. Writing a file is what every editor
+# does. Stopping a service is what an installer does. None of them is
+# evidence of anything on its own.
+#
+# What makes a run ransomware is doing most of them, to one purpose, inside
+# one execution. So the thing to measure is not whether any single stage
+# occurred but how many of them did, and whether they hang together in time.
+#
+# Stages the verdict already reads -- renaming, deleting, dropping a note --
+# are tracked separately, so the count can be reported both with and without
+# them. A feature that only works when the label's own inputs are included
+# is not evidence about the label.
+COMMAND_STAGES = {
+    "shadow_delete":   ("vssadmin", "shadowcopy", "shadowstorage", "wmic shadow"),
+    "recovery_off":    ("bcdedit", "wbadmin", "recoveryenabled", "bootstatuspolicy"),
+    "service_stop":    ("net stop", "sc stop", "sc config", "taskkill /f"),
+    "log_clear":       ("wevtutil", "cl system", "cl security"),
+    "backup_delete":   ("delete catalog", "delete systemstatebackup"),
+}
+
+ENUMERATION_APIS = {
+    "NtQueryDirectoryFile", "NtQueryDirectoryFileEx", "FindFirstFileExW",
+    "FindNextFileW", "GetLogicalDriveStringsW", "NtQueryVolumeInformationFile",
+    "SHGetFolderPathW", "GetDiskFreeSpaceExW",
+}
+
+PERSISTENCE_KEYS = ("currentversion\\run", "currentversion\\runonce",
+                    "\\winlogon\\shell", "\\userinit")
+
+WALLPAPER_MARKS = ("transcodedwallpaper", "\\themes\\", "wallpaper")
+
+# Stages that feed the verdict, kept apart from the rest.
+VERDICT_STAGES = {"rename", "delete", "note"}
+
+NOTE_WORDS = ("readme", "decrypt", "recover", "restore", "howto", "unlock",
+              "ransom", "yourfiles", "filesback")
+
+
+def stage_features(report):
+    """
+    How many distinct stages of the attack the run performed, and how tightly
+    they sit together.
+
+    A tool that archives files reads and writes and deletes. It does not also
+    enumerate every drive, stop services, clear logs, disable recovery and
+    change the wallpaper. The count of stages is a count, but of things that
+    are individually innocuous -- so unlike a count of write operations it
+    does not simply grow with how busy the run was.
+    """
+    behavior = report.get("behavior", {}) or {}
+    summary = behavior.get("summary", {}) or {}
+
+    # first time each stage was seen, where a time is available
+    seen_at = {}
+
+    def mark(stage, ts=None):
+        if stage not in seen_at or (ts and seen_at[stage] is None):
+            seen_at[stage] = ts
+        elif ts and seen_at[stage] and ts < seen_at[stage]:
+            seen_at[stage] = ts
+
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        kind = event.get("event")
+        data = event.get("data", {}) or {}
+        path = (data.get("file") or data.get("from") or "")
+        ts = event.get("timestamp")
+        low = path.lower()
+        if kind == "read":
+            mark("read", ts)
+        elif kind == "write":
+            mark("write", ts)
+            if any(m in low for m in WALLPAPER_MARKS):
+                mark("wallpaper", ts)
+            base = low.replace("/", "\\").split("\\")[-1]
+            flat = re.sub(r"[\s_\-\.!]+", "", base)
+            if any(w in flat for w in NOTE_WORDS):
+                mark("note", ts)
+        elif kind == "move":
+            mark("rename", ts)
+        elif kind == "delete":
+            mark("delete", ts)
+
+    for process in behavior.get("processes", []) or []:
+        for call in process.get("calls", []) or []:
+            api = call.get("api")
+            if api in ENUMERATION_APIS:
+                mark("enumerate", call.get("timestamp"))
+            elif api and api.startswith("Crypt") or (api or "").startswith("BCrypt"):
+                mark("crypto", call.get("timestamp"))
+
+    for key in (summary.get("write_keys") or []):
+        if any(k in key.lower() for k in PERSISTENCE_KEYS):
+            mark("persistence", None)
+            break
+
+    commands = " ".join(summary.get("executed_commands") or []).lower()
+    for stage, marks in COMMAND_STAGES.items():
+        if any(m in commands for m in marks):
+            mark(stage, None)
+
+    stages = set(seen_at)
+    clean = stages - VERDICT_STAGES
+
+    out = {
+        "n_stages_all": len(stages),
+        "n_stages_clean": len(clean),
+        "stage_ground_clearing": len(stages & {"shadow_delete", "recovery_off",
+                                                "service_stop", "log_clear",
+                                                "backup_delete"}),
+        "stage_has_enumerate": int("enumerate" in stages),
+        "stage_has_wallpaper": int("wallpaper" in stages),
+        "stage_has_persistence": int("persistence" in stages),
+    }
+
+    # How spread out in time the staging was. A run that does everything in
+    # one burst looks different from one that unfolds over minutes.
+    times = sorted(t for t in seen_at.values() if t)
+    if len(times) >= 2:
+        try:
+            from datetime import datetime
+            fmt = "%Y-%m-%d %H:%M:%S,%f"
+            first = datetime.strptime(times[0], fmt)
+            last = datetime.strptime(times[-1], fmt)
+            out["stage_span_sec"] = round((last - first).total_seconds(), 2)
+            out["stage_timed_count"] = len(times)
+        except (ValueError, TypeError):
+            out["stage_span_sec"] = ""
+            out["stage_timed_count"] = len(times)
+    else:
+        out["stage_span_sec"] = ""
+        out["stage_timed_count"] = len(times)
+    return out
+
+
+def set_relation_features(behavior):
+    """
+    How the set of files read overlaps the set written and the set destroyed.
+
+    Counting reads and writes says how much happened. Comparing the sets says
+    what kind of thing it was, and the comparison is a ratio of sets so it
+    does not move with volume.
+
+    An archiver reads many files and writes one: almost everything it read is
+    outside what it wrote. Encryption in place reads and writes the same
+    paths, so the two sets coincide. A dropper writes files it never read.
+    These are three different shapes of the same read and write counts.
+    """
+    reads, writes, destroys = set(), set(), set()
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        data = event.get("data", {}) or {}
+        kind = event.get("event")
+        path = data.get("file") or data.get("from")
+        if not path:
+            continue
+        if kind == "read":
+            reads.add(path)
+        elif kind == "write":
+            writes.add(path)
+        elif kind in DESTRUCTIVE:
+            destroys.add(path)
+
+    if not (reads or writes or destroys):
+        return {k: "" for k in (
+            "rw_jaccard", "write_not_read", "read_not_write",
+            "read_then_destroy", "write_then_destroy", "rw_size_ratio")}
+
+    union = reads | writes
+    return {
+        # Same paths read and written: encryption over the original file.
+        "rw_jaccard": round(len(reads & writes) / len(union), 4) if union else "",
+        # Written without being read: notes, dropped payloads, new archives.
+        "write_not_read": round(len(writes - reads) / len(writes), 4) if writes else "",
+        # Read and left alone: scanning, or an archiver's inputs.
+        "read_not_write": round(len(reads - writes) / len(reads), 4) if reads else "",
+        # Read, then removed.
+        "read_then_destroy": round(len(reads & destroys) / len(reads), 4) if reads else "",
+        "write_then_destroy": round(len(writes & destroys) / len(writes), 4) if writes else "",
+        # One output per input, or many inputs to one output.
+        "rw_size_ratio": round(len(writes) / len(reads), 4) if reads else "",
+    }
+
+
 def process_one(path):
     try:
         report = load_report(path)
@@ -376,6 +563,8 @@ def process_one(path):
     row.update(chain_features(behavior))
     row.update(extension_features(behavior))
     row.update(selectivity_features(behavior))
+    row.update(set_relation_features(behavior))
+    row.update(stage_features(report))
     return row
 
 

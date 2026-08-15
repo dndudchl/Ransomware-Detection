@@ -1,0 +1,323 @@
+/*
+ * hardneg_tools.c - Run the tools that are actually on the machine.
+ *
+ * Why this exists alongside the matrix
+ * ------------------------------------
+ * Everything in hardneg_matrix.c is code written for this experiment, and a
+ * reviewer is entitled to ask whether a detector was tested against
+ * programs built to test it. These are not that. 7-Zip, cipher, compact,
+ * robocopy, certutil, findstr and Defender are on the guest already -- the
+ * ransomware set walked past 7-Zip in 681 analyses and Adobe in 694 -- and
+ * they are invoked here the way an administrator would invoke them.
+ *
+ * The interesting ones are those whose file behaviour is genuinely
+ * indistinguishable from encryption:
+ *
+ *   7z with -mhe=on -sdel   reads every document, writes an encrypted
+ *                           container, removes the originals. Read, write,
+ *                           delete, with real cryptography in between. The
+ *                           only thing separating it from ransomware is
+ *                           that somebody asked for it.
+ *
+ *   cipher /e               turns on EFS. Files stay where they are, keep
+ *                           their names, and become unreadable to every
+ *                           other account. This is what AvosLocker looks
+ *                           like from the filesystem's point of view, and
+ *                           it is a Microsoft-signed binary.
+ *
+ *   compact /c              rewrites every file's contents in place. No
+ *                           rename, no delete, and every byte changes.
+ *
+ * The rest are there as the other half of the comparison: robocopy /E and
+ * findstr /s read just as much and destroy nothing, so a feature that fires
+ * on volume alone cannot tell them from the three above.
+ *
+ * The tool runs as a child process, which is how ransomware invokes
+ * vssadmin, so the events land in the analysis the same way.
+ *
+ * Build: see build_tools.sh
+ */
+
+#ifndef TOOL
+#define TOOL 1
+#endif
+
+#include <windows.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define MAX_FILES 300
+#define SEVENZIP  "C:\\Program Files\\7-Zip\\7z.exe"
+#define DEFENDER  "C:\\Program Files\\Windows Defender\\MpCmdRun.exe"
+#define ARCHIVE_PASSWORD "archive-2026"
+
+static char g_files[MAX_FILES][MAX_PATH];
+static int  g_count = 0;
+
+static void say(const char *fmt, ...)
+{
+    va_list a; va_start(a, fmt); vprintf(fmt, a); va_end(a);
+    printf("\n"); fflush(stdout);
+}
+
+/* Wait for the tool rather than firing and forgetting, so its work lands
+ * inside the analysis window instead of being cut off when this exits. */
+static int run(const char *command, DWORD wait_ms)
+{
+    STARTUPINFOA si; PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si)); si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+    ZeroMemory(&pi, sizeof(pi));
+
+    char buf[2048];
+    strncpy(buf, command, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+
+    if (!CreateProcessA(NULL, buf, NULL, NULL, FALSE,
+                        CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        say("  could not start: %s", command);
+        return 0;
+    }
+    WaitForSingleObject(pi.hProcess, wait_ms);
+    DWORD code = 0;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+    say("  exit %lu", (unsigned long)code);
+    return 1;
+}
+
+static void expand(const char *in, char *out, size_t n)
+{
+    if (!ExpandEnvironmentStringsA(in, out, (DWORD)n)) {
+        strncpy(out, in, n - 1);
+        out[n - 1] = '\0';
+    }
+}
+
+static void collect(const char *dir, int depth)
+{
+    if (depth > 2 || g_count >= MAX_FILES) return;
+    char pattern[MAX_PATH];
+    snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+            continue;
+        char full[MAX_PATH];
+        if (snprintf(full, sizeof(full), "%s\\%s", dir, fd.cFileName)
+                >= (int)sizeof(full)) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            collect(full, depth + 1);
+        } else if (g_count < MAX_FILES) {
+            strncpy(g_files[g_count], full, MAX_PATH - 1);
+            g_files[g_count][MAX_PATH - 1] = '\0';
+            g_count++;
+        }
+    } while (FindNextFileA(h, &fd) && g_count < MAX_FILES);
+    FindClose(h);
+}
+
+static void collect_decoys(void)
+{
+    const char *roots[] = { "%USERPROFILE%\\Desktop", "%USERPROFILE%\\Documents", NULL };
+    char dir[MAX_PATH];
+    for (int i = 0; roots[i]; i++) {
+        expand(roots[i], dir, sizeof(dir));
+        collect(dir, 0);
+    }
+}
+
+int main(void)
+{
+    char docs[MAX_PATH], desktop[MAX_PATH], profile[MAX_PATH], cmd[2048];
+    expand("%USERPROFILE%\\Documents", docs, sizeof(docs));
+    expand("%USERPROFILE%\\Desktop", desktop, sizeof(desktop));
+    expand("%USERPROFILE%", profile, sizeof(profile));
+    Sleep(3000);
+
+#if TOOL == 1
+    /* One encrypted container holding every document, sources removed.
+     * Reads everything, writes one file, deletes the originals. */
+    say("7z: encrypted archive of Documents, sources deleted");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\" a -p%s -mhe=on -y -sdel \"%s\\archive.7z\" \"%s\\*\"",
+             SEVENZIP, ARCHIVE_PASSWORD, desktop, docs);
+    run(cmd, 420000);
+
+#elif TOOL == 2
+    /* The same without -sdel. Identical reads and writes, nothing destroyed:
+     * the control for the variant above. */
+    say("7z: encrypted archive, sources kept");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\" a -p%s -mhe=on -y \"%s\\archive.7z\" \"%s\\*\"",
+             SEVENZIP, ARCHIVE_PASSWORD, desktop, docs);
+    run(cmd, 420000);
+
+#elif TOOL == 3
+    /* One archive per file, stored not compressed, original deleted. This is
+     * the closest a legitimate tool gets to ransomware: a one-to-one
+     * mapping, each output the size of its input, each original gone, each
+     * new name the old name with something appended. */
+    say("7z: one container per file, uncompressed, original deleted");
+    collect_decoys();
+    say("  %d files", g_count);
+    for (int i = 0; i < g_count && i < 120; i++) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\" a -p%s -mhe=on -mx0 -y -sdel \"%s.7z\" \"%s\"",
+                 SEVENZIP, ARCHIVE_PASSWORD, g_files[i], g_files[i]);
+        run(cmd, 20000);
+    }
+
+#elif TOOL == 4
+    /* EFS. Contents become unreadable to any other account, names and paths
+     * unchanged -- the filesystem trail of an in-place encrypting family,
+     * produced by a Microsoft-signed binary. */
+    say("cipher /e on Documents and Desktop");
+    snprintf(cmd, sizeof(cmd), "cmd.exe /c cipher.exe /e /a /s:\"%s\"", docs);
+    run(cmd, 300000);
+    snprintf(cmd, sizeof(cmd), "cmd.exe /c cipher.exe /e /a /s:\"%s\"", desktop);
+    run(cmd, 300000);
+
+#elif TOOL == 5
+    /* NTFS compression: every byte of every file rewritten, in place, with
+     * no rename and no delete. */
+    say("compact /c on Documents");
+    snprintf(cmd, sizeof(cmd), "cmd.exe /c compact.exe /c /s:\"%s\" /i /q", docs);
+    run(cmd, 300000);
+
+#elif TOOL == 6
+    /* Reads the whole tree and writes a copy of it. Nothing is destroyed,
+     * so the volume is comparable and the outcome is not. */
+    say("robocopy /E, copy the tree");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c robocopy.exe \"%s\" \"%s\\copy_of_docs\" /E /R:0 /W:0 /NFL /NDL",
+             docs, desktop);
+    run(cmd, 420000);
+
+#elif TOOL == 7
+    /* The same traversal, but the source is emptied. */
+    say("robocopy /MOVE, relocate the tree");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c robocopy.exe \"%s\" \"%s\\moved_docs\" /MOVE /E /R:0 /W:0 /NFL /NDL",
+             docs, desktop);
+    run(cmd, 420000);
+
+#elif TOOL == 8
+    /* certutil rewrites each file as base64 into a new file. Contents change
+     * completely, size grows, the original stays. A signed Windows binary
+     * doing a content transformation. */
+    say("certutil -encode, per file");
+    collect_decoys();
+    say("  %d files", g_count);
+    for (int i = 0; i < g_count && i < 120; i++) {
+        snprintf(cmd, sizeof(cmd),
+                 "cmd.exe /c certutil.exe -encode \"%s\" \"%s.b64\"",
+                 g_files[i], g_files[i]);
+        run(cmd, 15000);
+    }
+
+#elif TOOL == 9
+    /* Reads everything, writes nothing. The pure-read control. */
+    say("findstr /s, read every file");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c findstr.exe /s /i /m \"zzzznotfound\" \"%s\\*\"", profile);
+    run(cmd, 420000);
+
+#elif TOOL == 10
+    /* An antivirus scan opens every file in the tree and changes none of
+     * them: the highest read volume available from a program nobody would
+     * call suspicious. */
+    say("Defender scan of the user profile");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\" -Scan -ScanType 3 -File \"%s\"", DEFENDER, profile);
+    run(cmd, 480000);
+
+#elif TOOL == 11
+    /* PowerShell's own archive cmdlet: a different implementation of the
+     * same read-many-write-one shape. */
+    say("PowerShell Compress-Archive");
+    snprintf(cmd, sizeof(cmd),
+             "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "
+             "\"Compress-Archive -Path '%s\\*' -DestinationPath '%s\\docs.zip' -Force\"",
+             docs, desktop);
+    run(cmd, 420000);
+
+#elif TOOL == 12
+    /* Metadata only: attributes change, contents and names do not. */
+    say("attrib +h across the tree");
+    snprintf(cmd, sizeof(cmd), "cmd.exe /c attrib.exe +h \"%s\\*\" /s /d", docs);
+    run(cmd, 240000);
+
+#elif TOOL == 13
+    /* Ownership and permissions across a tree -- what a migration or a
+     * recovery from a broken ACL looks like. */
+    say("takeown and icacls across Documents");
+    snprintf(cmd, sizeof(cmd), "cmd.exe /c takeown.exe /f \"%s\" /r /d y", docs);
+    run(cmd, 300000);
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c icacls.exe \"%s\" /grant %%USERNAME%%:F /t /c /q", docs);
+    run(cmd, 300000);
+
+#elif TOOL == 14
+    /* xcopy: a third implementation of copying a tree. */
+    say("xcopy the tree");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c xcopy.exe \"%s\" \"%s\\xcopy_docs\\\" /E /I /Y /Q",
+             docs, desktop);
+    run(cmd, 420000);
+
+#elif TOOL == 15
+    /* Renaming a whole tree from the shell, no contents touched. */
+    say("shell rename across the tree");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c for /r \"%s\" %%f in (*) do @ren \"%%f\" \"%%~nxf.bak\"", docs);
+    run(cmd, 300000);
+
+#elif TOOL == 16
+    /* Chrome headless: a large installed application starting, doing work
+     * and exiting, with all the file activity that implies. */
+    say("Chrome headless");
+    snprintf(cmd, sizeof(cmd),
+             "\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" "
+             "--headless --disable-gpu --no-sandbox --dump-dom about:blank");
+    run(cmd, 120000);
+    snprintf(cmd, sizeof(cmd),
+             "\"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe\" "
+             "--headless --disable-gpu --no-sandbox --dump-dom about:blank");
+    run(cmd, 120000);
+
+#elif TOOL == 17
+    /* Several installed programs launched and closed, the ordinary activity
+     * of a machine in use. */
+    say("launch installed applications");
+    run("cmd.exe /c start /wait notepad.exe", 20000);
+    run("cmd.exe /c mspaint.exe", 20000);
+    run("\"" SEVENZIP "\"", 20000);
+    run("cmd.exe /c calc.exe", 20000);
+    Sleep(20000);
+    run("cmd.exe /c taskkill /f /im notepad.exe /im mspaint.exe "
+        "/im calculator.exe /im 7zFM.exe", 20000);
+
+#elif TOOL == 18
+    /* A backup script: read the tree, write a dated copy, prune what is
+     * older than a threshold. Reads, writes and deletes, for a reason
+     * nobody would question. */
+    say("backup and prune");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c robocopy.exe \"%s\" \"%s\\backup_20260815\" /E /R:0 /W:0 /NFL /NDL",
+             docs, desktop);
+    run(cmd, 300000);
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c forfiles /p \"%s\" /s /m *.* /d -0 /c \"cmd /c del @path\"", docs);
+    run(cmd, 300000);
+
+#else
+#error "unknown TOOL"
+#endif
+
+    say("done");
+    return 0;
+}

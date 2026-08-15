@@ -624,7 +624,8 @@ def stage2_victim_check(report, victim_dirs):
     Counting reads would classify that as encryption.
     """
     victim_counts = defaultdict(int)
-    destroyed_paths = set()
+    removed_paths = set()      # gone: deleted or renamed away
+    written_paths = set()      # written to, whether or not it existed before
     read_paths = set()
 
     for event in report.get("behavior", {}).get("enhanced", []) or []:
@@ -637,11 +638,33 @@ def stage2_victim_check(report, victim_dirs):
             if not path_in_victim_dirs(path, victim_dirs):
                 continue
             victim_counts[event_type] += 1
-            if event_type in DESTRUCTIVE_EVENT_TYPES:
-                destroyed_paths.add(path)
+            if event_type in ("delete", "move"):
+                removed_paths.add(path)
+            elif event_type == "write":
+                written_paths.add(path)
             elif event_type == "read":
                 read_paths.add(path)
 
+    # What counts as harming a decoy.
+    #
+    # Overwriting in place has to count: AvosLocker replaces the contents and
+    # leaves the name alone, and dropping that would put it back among the
+    # misses. But "an event occurred on a path inside a decoy folder" is a
+    # weaker claim than "a decoy was harmed", and three harmless programs were
+    # called encryption on the weaker one -- a note dropped into each folder,
+    # a copy written beside each document, and Word, whose ~$ lock files are
+    # created and deleted next to whatever is open.
+    #
+    # None of them touched a file that was already there. Two conditions
+    # separate the cases:
+    #
+    #   a write destroys only if the path was also read, since replacing
+    #   contents requires having had them, and creating a file does not;
+    #
+    #   a deletion destroys only if the run did not create the file first,
+    #   since removing one's own scratch file leaves the folder as it was.
+    self_created = written_paths - read_paths
+    destroyed_paths = (removed_paths - self_created) | (written_paths & read_paths)
     read_paths -= destroyed_paths
     destructive_events = sum(victim_counts.get(t, 0) for t in DESTRUCTIVE_EVENT_TYPES)
     return len(destroyed_paths), len(read_paths), destructive_events, dict(victim_counts)

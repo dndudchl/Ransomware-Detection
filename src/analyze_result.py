@@ -819,6 +819,18 @@ RESULT_FIELDNAMES = [
 ]
 
 
+def _analyze_for_pool(path, victim_dirs):
+    """
+    Worker entry point. Defined at module level because a process pool has to
+    pickle the callable, which rules out a closure or a lambda.
+    """
+    try:
+        return analyze_one(path, victim_dirs, manifest_path=None, quiet=True)
+    except Exception as e:
+        print(f"\n   [!] {path}: {type(e).__name__}: {e}")
+        return None
+
+
 def analyze_one(path, victim_dirs, manifest_path=None, quiet=False):
     report_path = resolve_report_path(path)
     if not report_path:
@@ -905,7 +917,8 @@ def print_single(result):
         print(f"   -> not usable for feature extraction")
 
 
-def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
+def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed,
+              workers=1):
     base = Path(analyses_dir)
     if not base.is_dir():
         print(f"[!] not a directory: {analyses_dir}")
@@ -920,11 +933,36 @@ def run_batch(analyses_dir, victim_dirs, out_csv, manifest_path, list_passed):
         print(f"No analysis directories here; reading {len(subdirs)} archived "
               f"reports instead\n")
 
+    # Reports run to a hundred megabytes each and parsing one is a couple of
+    # seconds of pure CPU, so a few thousand of them takes half an hour on one
+    # core. Each report is independent, which makes this the easiest kind of
+    # work to spread out: hand each one to a worker and collect the verdicts.
+    #
+    # The manifest is deliberately not written from the workers -- concurrent
+    # writes to one CSV would corrupt it. Batch mode already leaves the
+    # manifest alone and only reports.
     results = []
-    for d in subdirs:
-        r = analyze_one(d, victim_dirs, manifest_path, quiet=True)
-        if r:
-            results.append(r)
+    if workers and workers > 1 and len(subdirs) > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        from functools import partial
+        work = partial(_analyze_for_pool, victim_dirs=victim_dirs)
+        print(f"Parsing {len(subdirs)} reports across {workers} processes\n")
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            done = 0
+            for r in pool.map(work, [str(d) for d in subdirs], chunksize=4):
+                done += 1
+                if done % 50 == 0 or done == len(subdirs):
+                    print(f"\r   {done}/{len(subdirs)}", end="", flush=True)
+                if r:
+                    results.append(r)
+        print()
+        results.sort(key=lambda r: (len(str(r.get("task_id", ""))),
+                                     str(r.get("task_id", ""))))
+    else:
+        for d in subdirs:
+            r = analyze_one(d, victim_dirs, manifest_path, quiet=True)
+            if r:
+                results.append(r)
 
     if list_passed:
         for r in results:
@@ -978,12 +1016,18 @@ def main():
                          help="Manifest CSV to update with verdicts automatically")
     parser.add_argument("--victim-dirs", nargs="+", default=DEFAULT_VICTIM_DIRS,
                          help="Decoy folder path fragments in the guest")
+    parser.add_argument("--workers", type=int, default=1, metavar="N",
+                         help="Parse this many reports at once in batch mode. Each is "
+                              "independent, so this scales with physical cores; on a "
+                              "machine also running the sandbox, leave it at 1 or 2 so "
+                              "the guests keep their CPU.")
     parser.add_argument("--list-passed", action="store_true",
                          help="Print only the task ids that reached TRUE_ENCRYPTION")
     args = parser.parse_args()
 
     if args.batch:
-        run_batch(args.batch, args.victim_dirs, args.out, args.manifest, args.list_passed)
+        run_batch(args.batch, args.victim_dirs, args.out, args.manifest,
+                  args.list_passed, workers=args.workers)
     elif args.path:
         result = analyze_one(args.path, args.victim_dirs, args.manifest)
         if result:

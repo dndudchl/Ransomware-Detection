@@ -1042,6 +1042,23 @@ def open_report(path):
         return json.load(f), fallback_id
 
 
+def _extract_for_pool(target, label, source, window_sec, manifest_by_sha, id_prefix):
+    """
+    Worker entry point: build one row and hand it back, writing nothing.
+
+    Defined at module level so the pool can pickle it, and given
+    features_out=None so that only the parent touches the CSV.
+    """
+    path, verdict = target
+    try:
+        return process_one(path, label, source, window_sec, None, manifest_by_sha,
+                            quiet=True, dynamic_ok=None, verdict=verdict,
+                            id_prefix=id_prefix)
+    except Exception as e:
+        print(f"\n   [!] {path}: {type(e).__name__}: {e}")
+        return None
+
+
 def process_one(path, label, source, window_sec, features_out, manifest_by_sha,
                  quiet=False, sample_id_override=None, id_prefix="",
                  existing_ids=None, existing_shas=None, overwrite=False,
@@ -1143,6 +1160,10 @@ def main():
                               "the sandbox actually saw run -- including samples that "
                               "executed without encrypting, which is where preparation "
                               "behaviour is visible.")
+    parser.add_argument("--workers", type=int, default=1, metavar="N",
+                         help="Parse this many reports at once in batch mode. Rows are "
+                              "still written by the parent process alone. On a machine "
+                              "also running the sandbox, leave this at 1 or 2.")
     parser.add_argument("--id-prefix", default="",
                          help="Prepend this to every sample id. Needed when merging "
                               "results from two hosts, whose task numbering overlaps: "
@@ -1223,25 +1244,72 @@ def main():
             return m.group(1) if m else path.stem
 
         n_full = n_static = 0
+
+        # Work out what to process before doing any of it, so the list can be
+        # handed to a pool.
+        targets = []
         for d in subdirs:
             task_id = task_id_of(d)
             verdict = verdict_by_id.get(task_id) if verdict_by_id else args.keep_verdict
             if verdict != args.keep_verdict and not args.static_for_all:
                 continue
-            # Coverage is decided per analysis, from whether the sandbox saw
-            # the sample run -- not from what verdict it was given.
-            dynamic_ok = None
+            targets.append((str(d), verdict or ""))
 
-            row = process_one(d, args.label, args.source, args.window,
-                              args.features_out, manifest_by_sha,
-                              existing_ids=existing_ids, existing_shas=existing_shas,
-                              overwrite=args.overwrite, dynamic_ok=dynamic_ok,
-                              verdict=verdict or "", id_prefix=args.id_prefix)
-            if row:
-                if row["coverage"] == "full":
-                    n_full += 1
-                else:
-                    n_static += 1
+        def record(row):
+            nonlocal n_full, n_static
+            if not row:
+                return
+            if row["coverage"] == "full":
+                n_full += 1
+            else:
+                n_static += 1
+
+        if args.workers > 1 and len(targets) > 1:
+            # Parsing dominates the runtime and each report is independent,
+            # so the work is spread across processes. Only the parent writes
+            # the CSV: concurrent appends from several processes would
+            # interleave and corrupt rows.
+            from concurrent.futures import ProcessPoolExecutor
+            from functools import partial
+            work = partial(_extract_for_pool,
+                           label=args.label, source=args.source,
+                           window_sec=args.window, manifest_by_sha=manifest_by_sha,
+                           id_prefix=args.id_prefix)
+            print(f"Parsing {len(targets)} reports across {args.workers} processes\n")
+            with ProcessPoolExecutor(max_workers=args.workers) as pool:
+                done = 0
+                for row in pool.map(work, targets, chunksize=4):
+                    done += 1
+                    if done % 50 == 0 or done == len(targets):
+                        print(f"\r   {done}/{len(targets)}", end="", flush=True)
+                    if not row:
+                        continue
+                    sid, sha = row["sample_id"], row["sha256"]
+                    if existing_shas and sha and sha in existing_shas \
+                            and existing_shas[sha] != sid:
+                        print(f"\n   [warn] sha256 of task {sid} already present as "
+                              f"task {existing_shas[sha]}; same binary analysed twice "
+                              f"-- deduplicate before modelling")
+                    if args.features_out:
+                        if args.overwrite and existing_ids is not None \
+                                and sid in existing_ids:
+                            rewrite_feature_row(args.features_out, row)
+                        else:
+                            append_feature_row(args.features_out, row)
+                        if existing_ids is not None:
+                            existing_ids.add(sid)
+                        if existing_shas is not None and sha:
+                            existing_shas.setdefault(sha, sid)
+                    record(row)
+            print()
+        else:
+            for path, verdict in targets:
+                row = process_one(path, args.label, args.source, args.window,
+                                  args.features_out, manifest_by_sha,
+                                  existing_ids=existing_ids, existing_shas=existing_shas,
+                                  overwrite=args.overwrite, dynamic_ok=None,
+                                  verdict=verdict, id_prefix=args.id_prefix)
+                record(row)
 
         processed = n_full + n_static
         print(f"\n[done] {processed} rows written: {n_full} full, {n_static} static-only")

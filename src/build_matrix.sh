@@ -80,6 +80,41 @@ build e4_shadow_only    "removes shadow copies"           -DFILES_ONLY=0 -DEFFEC
 build e28_prep_only     "shadow, recovery and service"    -DFILES_ONLY=0 -DEFFECTS=28
 
 echo
+echo "encryption itself -- m6 differs from the baseline in one step and no other"
+echo "  m2 reads, writes, deletes.  m6 reads, encrypts, writes, deletes."
+echo "  Nothing else about them differs, so a feature that separates the two"
+echo "  is seeing the cryptography and one that does not is seeing the files."
+build m6_crypto  "read, CryptEncrypt, write, delete   [E]"        -DMETHOD=6
+build m2_nocrypt "the same without the encryption     [F, = m2]"  -DMETHOD=2
+
+echo
+echo "destruction without cryptography"
+build m7_wipe    "overwrite with random, then delete   sdelete, a wiper" -DMETHOD=7
+build m8_keep    "copy and keep the original           non-destructive"  -DMETHOD=8
+build m9_move    "move to another directory            name survives"    -DMETHOD=9
+
+echo
+echo "naming -- one family renamed 4,908 files this way and registered"
+echo "          nothing on the append check"
+build r1_replace_name "discard the original name entirely" -DMETHOD=2 -DRENAME_MODE=1
+build r1_rename_only  "rename only, name discarded"        -DMETHOD=3 -DRENAME_MODE=1
+
+echo
+echo "ordering -- same counts, no interleaving"
+build b1_batch "read every file, then write every file" -DBATCH=1
+
+echo
+echo "generated targets -- volume without the confound that reaching more"
+echo "  decoys also means reaching more directories and more file types"
+build g0100 "100 files it made itself"  -DGENERATE=100
+build g0500 "500 files it made itself"  -DGENERATE=500
+build g1500 "1500 files it made itself" -DGENERATE=1500
+
+echo
+echo "wide scope, nothing destroyed"
+build w_progfiles_read "read Program Files, write nothing" -DSCOPE=2 -DMETHOD=8
+
+echo
 echo "combined -- the baseline plus everything, the closest thing here to"
 echo "            actual ransomware without any encryption"
 build x_full "copy+delete, note, wallpaper, shadow, recovery, service" \

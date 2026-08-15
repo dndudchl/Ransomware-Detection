@@ -130,6 +130,20 @@ MIN_DESTROYED_DECOY_FILES = 3
 # separates them.
 MIN_APPEND_RENAMES = 8
 
+# The most a run's suffixes may vary before the append axis stops counting.
+#
+# A family appends a marker so it can recognise its own work later, so the
+# suffixes converge: Cuba puts .cuba on everything, Clop puts .Clop. Across
+# 1,349 encrypting runs with eight or more append-renames, every single one
+# concentrated on a handful of suffixes -- not one had them mostly distinct.
+#
+# Ordinary software appending a different string each time is naming
+# temporary files. Two benign programs were called encryption on exactly
+# that basis: sixteen renames onto sixteen different suffixes, and nineteen
+# onto ten. Requiring convergence excludes both and costs nothing, because
+# nothing in the ransomware set looks like that.
+MAX_SUFFIX_DIVERSITY = 0.3
+
 # Renames onto one shared new extension needed before that counts on its own.
 # Set well above what bulk conversion produces: a person converting a folder
 # of images works in tens, while the runs this catches rename thousands.
@@ -312,6 +326,12 @@ RANSOM_NOTE_EXPLICIT = [
 NON_NOTE_EXTENSIONS = {
     "exe", "dll", "sys", "drv", "ocx", "cpl", "scr", "com", "msi", "cab",
     "tmp", "log", "dat", "db", "sqlite", "etl", "evtx", "pf", "mui",
+    # A shortcut holds no text, so it cannot be a note however it is named.
+    # Windows ships one called "Backup and Restore (Windows 7).lnk", which
+    # contains the word "restore" and was read as a note stating its purpose
+    # -- enough on its own, under the explicit-name rule, to call a benign
+    # run encryption.
+    "lnk", "url", "ico", "cur", "ani", "theme", "deskthemepack",
 }
 
 
@@ -668,7 +688,8 @@ def analyze(report, victim_dirs):
     if destroyed >= MIN_DESTROYED_DECOY_FILES:
         verdict = "TRUE_ENCRYPTION"
         reason = f"destroyed {destroyed} decoy files"
-    elif n_append >= MIN_APPEND_RENAMES:
+    elif (n_append >= MIN_APPEND_RENAMES
+            and n_suffixes / max(1, n_append) <= MAX_SUFFIX_DIVERSITY):
         verdict = "TRUE_ENCRYPTION"
         reason = (f"{n_append} append-renames outside the decoy folders "
                   f"({n_suffixes} distinct suffix"

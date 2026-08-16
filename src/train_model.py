@@ -408,9 +408,13 @@ def main():
                 w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v)
                             for k, v in t.items()})
         print(f"\n[saved] {args.importance_out}")
-        print("  'FP hard' is the drop in hard negative false positives when the")
-        print("  column is shuffled. A positive number means the feature was")
-        print("  causing those false positives.")
+        print("  'FP hard' is the change in the hard negative false positive")
+        print("  rate when the column is shuffled, base minus shuffled. Positive")
+        print("  means the feature was driving those false positives; negative")
+        print("  means it was holding them down and destroying it makes matters")
+        print("  worse. n_paths comes out negative because the hard negatives")
+        print("  touch fewer paths than the ransomware, so the model was using it")
+        print("  to keep some of them on the right side.")
 
     results = []
     print(f"\n{'':<16}{'feat':>5}{'AUC':>8}{'TPR':>8}"
@@ -483,8 +487,13 @@ def main():
         print(f"\n{'feature':<28}{'AUC lost':>10}{'FP hard gained':>16}")
         for c, da, dh in sorted(loo, key=lambda x: -x[1])[:20]:
             print(f"{c:<28}{da:>10.4f}{dh:>16.4f}")
-        print("\n  A feature can matter and still show nothing here, because "
-              "another\n  feature correlated with it takes over when it is removed.")
+        biggest = max(abs(d) for _c, d, _h in loo) if loo else 0.0
+        print(f"\n  Largest AUC change from removing any single feature: {biggest:.4f}")
+        print("  A feature can matter and still show nothing here, because another")
+        print("  correlated with it takes over when it is removed. When nothing at")
+        print("  all moves, the set is redundant throughout -- which is itself the")
+        print("  result, and a stronger one than any group ablation: it is not that")
+        print("  a particular group is unnecessary, it is that no single column is.")
 
     full = results[len(CUMULATIVE) - 1]
     print(f"\nper-family, using all groups:")

@@ -29,8 +29,11 @@ Nothing in the event data hinted at this. The 49 missed analyses averaged
 170,000 API calls and 455 destructive file events each; they looked busy and
 healthy.
 
-After the fixes described below, detection on the confirmed-encrypting set
-rose from 17 of 73 to 111 of 116.
+After the fixes described below, detection on the first confirmed-encrypting
+set rose from 17 of 73 to 111 of 116. A second batch of 200 analyses was then
+labelled independently, and the same process repeated: 47 of 57 at the start,
+54 of 57 once three further failures were fixed and a corroboration rule
+added.
 
 ## Failure 1 — counting events instead of files
 
@@ -135,6 +138,198 @@ entry is in flight exactly while that file is absent — true for queued tasks
 (no directory yet) and running ones alike, regardless of what any other
 process has or has not recorded.
 
+## Failure 6 — treating a missing log line as damage
+
+A tool for separating sandbox failures from sample failures decided that an
+analysis whose guest-side log did not end with "Analysis completed" had been
+cut short.
+
+That line is written when the analyzer shuts itself down, having watched the
+sample exit. Ransomware does not exit -- it runs until the analysis timeout,
+at which point CAPE stops the guest and the line is never written. Its
+absence is the normal outcome for exactly the samples that worked.
+
+The classifier consequently marked successful runs for re-submission: 163,000
+API calls, 41 screenshots, 110 decoy files destroyed, flagged as needing to
+be run again.
+
+Fix: ask whether the run produced data, not how its log ended.
+
+## Failure 7 — reading quiet as broken
+
+The same tool then used a call-count threshold of 500, borrowed from the
+"did the sample do anything" gate elsewhere in the pipeline. That is a
+different question.
+
+One sample opened a socket, initialised Windows CNG, and waited for a
+connection that never came. 263 API calls, correctly monitored, nothing
+wrong with the analysis -- and classified as an infrastructure failure.
+
+What matters is whether the sandbox observed the guest, not whether the
+guest was busy. The fix reads CAPE's own statement instead: it logs "Agent
+is dead" when the guest stops answering, which distinguishes a sample that
+ran quietly from one whose guest was lost after recording a few calls.
+
+## Failure 8 — an extension allowlist, again
+
+Ransom note detection was added, matching filenames against a list of
+plausible note extensions: txt, html, hta, rtf, url, lnk, bmp, jpg.
+
+Three analyses dropped a note named `readme.md`. The list did not contain
+`md`, so they registered nothing.
+
+This is Failure 2 repeated, in code written after Failure 2 had been
+documented. Knowing that allowlists fail this way was not enough to avoid
+writing another one. The fix is the same: exclude what a note cannot be
+(executables, drivers, logs) rather than list what it might be.
+
+## Failure 9 — assuming a rename is logged as a rename
+
+Append-renaming -- keeping the original filename and adding a suffix -- was
+detected by reading move events for a destination that extends the source.
+
+One family produces no move events at all. It writes `X.exe` and separately
+deletes `X`. Structurally this is the same operation, and it was applied to
+45 files with every original deleted, but with no move event to read it
+scored zero.
+
+Fix: reconstruct the pairs from the summary lists as well. A written path
+that extends a deleted path in the same directory is a rename regardless of
+how the sandbox chose to record it.
+
+## Failure 10 — a shortcut read as a note, and a rename rule that never asked the suffixes to agree
+
+The first nine failures were all found the same way: a run that should have
+been detected was not, or one that should not have been was. The tenth pair
+was found differently -- by pointing the verdict at 1,563 programs that had
+no reason to be ransomware at all.
+
+Five of them were called encryption.
+
+### What each one was
+
+Two were not benign. Tasks 2232 and 2233 were `hardneg_worker.exe`, run
+during an earlier experiment and left in the archive directory when the
+benign batch was collected. They destroyed forty decoy files each, which is
+what they were written to do. Finding them here is a lesson about keeping
+experiment output separate from data collection, not about the verdict.
+
+The other three were real.
+
+**A shortcut treated as a note.** Windows ships a Control Panel link called
+`Backup and Restore (Windows 7).lnk`. The note check matches on words that
+state the note's purpose, `restore` among them, and a name that explicit is
+enough on its own -- one directory suffices. A `.lnk` file holds no text and
+cannot be a note however it is named, so the extension went on the list that
+was already excluding executables and logs.
+
+**Sixteen renames onto sixteen different suffixes.** Two benign programs
+renamed files with a distinct string appended each time, which is what
+temporary file naming looks like. The append-rename axis counted them and
+fired at its threshold of eight.
+
+The fix is a requirement the axis never had: the suffixes have to converge.
+A family appends a marker so it can recognise its own work later, so they
+do converge -- and measuring it across the ransomware set showed how
+completely:
+
+| among 1,349 encrypting runs with 8+ append-renames | count |
+|---|---|
+| suffixes mostly distinct (over 80% unique) | **0** |
+| mixed (30-80%) | **0** |
+| concentrated on a few suffixes | **1,349** |
+
+Not one encrypting run in the set looked like the two benign programs.
+Requiring `distinct_suffixes / append_renames <= 0.3` excludes both and, on
+this evidence, costs nothing.
+
+### What the two changes actually cost
+
+| | ransomware detected | benign false positives | hard negatives flagged |
+|---|---|---|---|
+| before | 1,894 | 5 | 44 |
+| after both | **1,891** | **1** | 44 |
+
+Three encrypting runs were lost to gain four. The two remaining alarms were
+the hard negatives that should not have been in the folder.
+
+Measuring the two fixes separately is the point of doing them separately:
+the suffix rule and the shortcut exclusion address different mistakes, and
+combining them would have left it unclear which one paid for the three lost
+detections.
+
+## Failure 11 — counting a file the run made itself as a file it destroyed
+
+Sixty-eight programs were then written specifically to be difficult: as
+active as ransomware, doing something a person would ask for. Forty-four
+were called encryption.
+
+Most of those forty-four had in fact removed or replaced the user's files
+and are supposed to be detected. Three had not touched anything that already
+existed:
+
+| variant | what it did | why it fired |
+|---|---|---|
+| `e1_note_only` | wrote a note into each folder | 11 "decoy files destroyed" |
+| `m5_drop` | wrote a copy beside each document | 90 "decoy files destroyed" |
+| `tool_open_docs` | opened documents in Word and Acrobat | 6 "decoy files destroyed" |
+
+None of them read a decoy, and none deleted one. What they had in common was
+writing inside a decoy folder, and `write` is in the destructive event list
+deliberately -- removing it would put AvosLocker, which overwrites in place
+and leaves the name alone, back among the misses.
+
+The distinction the check was missing is between replacing a file's contents
+and creating a file next to it. Two conditions separate them:
+
+- a **write** destroys only if the run also **read** that path, because
+  replacing contents requires having had them and creating a file does not;
+- a **deletion** destroys only if the run did not **create** the file first,
+  because removing one's own scratch file leaves the folder as it was.
+
+The second condition is what catches Word. Office writes `~$document.docx`
+beside whatever is open and deletes it on close, and both events land in a
+decoy folder.
+
+| | ransomware detected | benign false positives | hard negatives flagged |
+|---|---|---|---|
+| after Failure 10 | 1,891 | 1 | 44 |
+| after Failure 11 | **1,886** | **1** | **41** |
+
+Five encrypting runs were lost. Whether that is the right trade depends on
+what the five were, and it is worth checking rather than assuming: A258,
+A456, B465, B676, B758 and B880 changed verdict, and if any of them
+overwrote decoys in place without a recorded read, the read requirement is
+too strict for a case that matters.
+
+### What did not get fixed, because it cannot be
+
+Two of the sixty-eight destroyed the contents of every document in the decoy
+folders and registered nothing at all:
+
+| variant | what it did | decoy events recorded |
+|---|---|---|
+| `tool_cipher` | `cipher /e` -- EFS encryption in place | **0** |
+| `tool_compact` | `compact /c` -- NTFS compression in place | **0** |
+
+Both are Microsoft-signed binaries shipped with Windows. Both rewrite every
+byte of every file. Neither produces a userland file event the sandbox
+records, because the work happens in the filesystem driver.
+
+No threshold and no feature reaches this. It is the same shape as the
+BlackBasta run that rebooted into safe mode and encrypted outside the
+analysis window: the detection is not wrong, it is looking somewhere the
+behaviour did not occur.
+
+And one that was fixed as far as it can be:
+
+`stage2` reads each decoy and writes the same bytes back to the same path.
+That is an editor saving an unchanged document, and it is also exactly what
+AvosLocker does. The verdict calls it encryption, correctly by its own
+definition, and there is no file event that separates the two. What
+distinguishes them is whether somebody asked for it, and consent leaves no
+trace in a sandbox.
+
 ## The common shape
 
 Every one of the four assumed that the world would arrive in a particular
@@ -147,6 +342,10 @@ form:
 | 3 | every event carries `data.file` | move events carry `from`/`to` |
 | 4 | volume of activity implies significance | a precise sample touches little |
 | 5 | another process will record completion | it was not being run that way |
+| 6 | a finished log means a healthy run | ransomware runs until the timeout |
+| 7 | few API calls means a broken analysis | a sample can wait on a socket |
+| 8 | note extensions are known in advance | `readme.md` |
+| 9 | a rename is logged as a move | write plus delete does the same thing |
 
 None produced an error. Each silently returned a plausible-looking answer,
 which is why they survived until an independent source of truth contradicted
@@ -217,6 +416,12 @@ found them:
 | **rename check alone would find** | **87 / 111** |
 | **together** | **111 / 111** |
 
+On the second labelled batch, with the ransom note axis and the
+corroboration rule added, detection went from 47 of 57 to 54 of 57. The
+three that remain undetected recorded no file events at all: the sample
+killed the sandbox agent before anything was written down, which is a
+measurement failure rather than a detection failure.
+
 Neither axis is sufficient. Netwalker never renames anything — it overwrites
 decoy files in place, so only the decoy check sees it. Cuba never reaches the
 decoys, so only the rename check sees it. Each family is invisible to one of
@@ -226,6 +431,93 @@ This is the project's central claim, measured on its own verification code
 rather than argued in the abstract: a single indicator sees one
 implementation strategy, and coverage comes from combining indicators that
 fail in different directions.
+
+## A third axis: the demand itself
+
+Ransomware announces itself. Whatever it does to the files, it leaves a note
+telling the victim how to pay, and it leaves one wherever the victim might
+look.
+
+That last part is what makes the note detectable without a list of known
+filenames. Plenty of software ships a `readme`; almost none writes an
+identically-named file into every directory it touched. Observed spreads in
+this dataset:
+
+| Note name | Directories |
+|---|---|
+| `readmefordecrypt.txt` | 1,442 |
+| `e76b3b-readme.txt` | 423 |
+| `restore-my-files.txt` | 309 |
+| `how to restore your files.txt` | 2 - 72, across 12 analyses |
+| `og5iasxf4.readme.txt` | 6 |
+
+Names vary far too much to enumerate: random prefixes (`cmfmxqq8w.readme.txt`),
+embedded victim identifiers
+(`readme.md.id[ec4dac17-2822].[<address>].eight`), and ordinary words. What
+does not vary is that the same file appears in many places at once.
+
+Two rules follow, and both were set from the labelled data:
+
+- A name that states the purpose -- decrypt, recover, restore, unlock,
+  ransom, how-to -- counts on its own, because some families leave a single
+  copy and would otherwise be invisible. No benign file in the labelled set
+  carries such a name.
+- Any other note-like name needs two or more directories.
+
+Measured against the labels, notes appeared in two or more directories in 36
+of 57 confirmed encrypting runs and in 1 of 79 runs where nothing was
+encrypted -- and that one turned out to be encryption the manual pass had
+missed.
+
+One caveat found the hard way: matching filenames alone produces false
+positives. Three analyses were credited with a ransom note that was really a
+`README.md` belonging to a `sysmon-config` project sitting in the recycle
+bin. Those analyses were encrypting, but for an unrelated reason, and the
+note detection had been right by accident.
+
+## Corroboration: what the thresholds cannot see individually
+
+Each axis has a threshold chosen so that the axis is safe alone: three
+destroyed decoy files, eight append-renames, a note in two directories. That
+safety creates a blind spot immediately below each line. Two destroyed files
+is not enough. Four append-renames is not enough. A note in one directory is
+not enough.
+
+Two analyses sat precisely there:
+
+| | decoy files | append-renames | note directories |
+|---|---|---|---|
+| one | 2 (needs 3) | 1 (needs 8) | 0 |
+| other | 0 | 4 (needs 8) | 1 (needs 2) |
+
+Both had encrypted. Neither could be seen by any single rule.
+
+What makes them recoverable is how sharply the negative set behaves.
+Counting how many of the three axes show *anything at all*, regardless of
+magnitude:
+
+| Axes showing anything | Confirmed encryption | No encryption |
+|---|---|---|
+| 0 | 3 | **79** |
+| 1 | 5 | 0 |
+| 2 | 22 | 0 |
+| 3 | 29 | 0 |
+
+Not one of the 79 non-encrypting runs registered on any axis. That includes
+ten that were thoroughly active -- one made 71,822 API calls and wrote 921
+files -- and still showed zero destroyed decoys, zero append-renames, zero
+notes. Ordinary file activity and ransomware-shaped file activity separate
+completely.
+
+So a run showing faint traces on two independent axes is not two
+coincidences. The rule added is simply that: **two or more axes non-zero
+counts as encryption, even when no single one reaches its threshold.** It
+recovered both analyses and flagged none of the 79 negatives.
+
+This is the project's central claim appearing in its own verification code.
+The thresholds are single-feature rules, and each is blind in its own way.
+What sees past them is not a better threshold but the observation that the
+signals occur together.
 
 ## What this means for the detection features
 

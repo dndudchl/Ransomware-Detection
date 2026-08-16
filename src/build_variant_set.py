@@ -37,6 +37,7 @@ import os
 import csv
 import random
 import argparse
+from collections import Counter
 import subprocess
 
 CC = "x86_64-w64-mingw32-gcc"
@@ -53,8 +54,19 @@ METHODS = {
     9: "move to another directory",
     10: "scratch files, written then removed",
 }
-SCOPES = {1: "user profile", 2: "Program Files", 3: "walk C:\\"}
-LIMITS = [0, 10, 50, 100, 200]
+SCOPES = {1: "user profile", 2: "Program Files", 3: "walk C:\\",
+          4: "AppData", 5: "several roots at once"}
+# Spaced roughly logarithmically, because the quantity being traced spans
+# three orders of magnitude and the interesting part is at the bottom.
+#
+# The benign programs that executed touch a median of 3 distinct paths and
+# are almost never flagged; the hard negatives touch 95 and are flagged 72%
+# of the time. Everything that decides the false positive rate happens
+# between those two numbers, and the first set of variants had nothing
+# between 10 and 50. Ransomware touches a median of 578, so the upper end
+# has to reach past that as well -- and since the decoy set is only 176
+# files, the counts above it can only come from generated targets.
+LIMITS = [0, 1, 3, 5, 10, 20, 35, 50, 75, 100, 140, 176]
 FILTERS = {0: "all types", 1: "documents", 2: "media", 3: "executables"}
 TIMINGS = {0: "burst", 1: "spread", 2: "batched"}
 
@@ -79,13 +91,35 @@ def coherent(p):
     # Scratch files are named after the file they were staged from, so the
     # method needs something to enumerate, and its output has one extension
     # whatever the filter says.
-    if p["METHOD"] == 10 and p["FILTER"] == 3 and p["SCOPE"] != 2:
+    if p["METHOD"] == 10 and p["FILTER"] == 3 and p["SCOPE"] not in (2, 3, 5):
         return False
     # A run doing no file work at all is the FILES_ONLY=0 case, and those are
     # worth having, but only with at least one side behaviour to perform.
     if not p["FILES_ONLY"] and p["EFFECTS"] == 0:
         return False
     return True
+
+
+def expected_paths(p):
+    """
+    Roughly how many distinct files the variant will reach.
+
+    An estimate, not a measurement -- the run may find fewer -- but accurate
+    enough to spread the set across the range, which is all it is used for.
+    """
+    if p["GENERATE"]:
+        n = p["GENERATE"]
+    elif p["SCOPE"] == 1:
+        n = 176                    # the decoy set
+    elif p["SCOPE"] == 4:
+        n = 900                    # AppData, smaller than Program Files
+    else:
+        n = 2000                   # capped by the timeout, not by the tree
+    if p["LIMIT"]:
+        n = min(n, p["LIMIT"])
+    if p["FILTER"]:
+        n = int(n * 0.35)          # one file type out of the mix
+    return max(1, n)
 
 
 def draw(rng):
@@ -97,7 +131,11 @@ def draw(rng):
         "TIMING": rng.choice(list(TIMINGS)),
         "RENAME_MODE": rng.choice([0, 0, 1]),      # append is the common case
         "BATCH": rng.choice([0, 0, 0, 1]),
-        "GENERATE": rng.choice([0, 0, 0, 0, 100, 500, 1500]),
+        # Generated targets are the only way past the 176 decoys, so they
+        # carry the top of the range on their own and are drawn more often
+        # than the one-in-seven the first set used.
+        "GENERATE": rng.choice([0, 0, 0, 0, 0, 0,
+                                 50, 100, 250, 400, 600, 900, 1400, 2000]),
         "FILES_ONLY": rng.choice([1, 1, 1, 1, 1, 1, 1, 1, 1, 0]),
         "EFFECTS": 0,
     }
@@ -167,9 +205,23 @@ def main():
     os.makedirs(outdir, exist_ok=True)
     rng = random.Random(args.seed)
 
+    # Drawing each parameter independently spreads the factors evenly but not
+    # the quantity that matters. Volume is set by three of them at once --
+    # the limit, whether targets are generated, and the file type filter --
+    # so uniform draws pile up at the low end, and the decade around the
+    # ransomware median ends up with a handful of variants in it.
+    #
+    # Accepting into path-count buckets instead fills the range. Factors stay
+    # near-uniform because every bucket is reachable by many combinations of
+    # them; what changes is that no decade is left empty.
+    BUCKETS = [(1, 3), (4, 10), (11, 30), (31, 100),
+               (101, 300), (301, 1000), (1001, 10**9)]
+    per_bucket = max(1, args.count // len(BUCKETS))
+
     chosen, seen = [], set()
+    filled = Counter()
     attempts = 0
-    while len(chosen) < args.count and attempts < args.count * 200:
+    while len(chosen) < args.count and attempts < args.count * 400:
         attempts += 1
         p = draw(rng)
         if not coherent(p):
@@ -177,10 +229,38 @@ def main():
         n = name_of(p)
         if n in seen:
             continue
+        v = expected_paths(p)
+        b = next(f"{lo}-{hi}" for lo, hi in BUCKETS if lo <= v <= hi)
+        # Once a bucket has its share, keep drawing for the others. The last
+        # few slots go to whoever turns up, so a bucket the parameter space
+        # can barely reach does not stall the whole draw.
+        if filled[b] >= per_bucket and len(chosen) < args.count * 0.9:
+            continue
+        filled[b] += 1
         seen.add(n)
         chosen.append((n, p))
 
+    # How many paths each variant will actually reach, which is the axis the
+    # false positive curve is drawn against. Reported here because a set that
+    # leaves a decade empty cannot show where the threshold is, and that is
+    # not visible from the parameter counts alone.
+    buckets = Counter()
+    for _n, p in chosen:
+        v = expected_paths(p)
+        for lo, hi in [(1, 3), (4, 10), (11, 30), (31, 100), (101, 300),
+                       (301, 1000), (1001, 10**9)]:
+            if lo <= v <= hi:
+                buckets[f"{lo}-{hi if hi < 10**9 else ''}"] += 1
+                break
+
     print(f"drew {len(chosen)} distinct combinations from {attempts} attempts")
+    print("\nexpected distinct paths touched, which is the axis the false")
+    print("positive rate turned out to depend on:")
+    for k in ["1-3", "4-10", "11-30", "31-100", "101-300", "301-1000", "1001-"]:
+        n = buckets.get(k, 0)
+        bar = "#" * int(n / max(1, max(buckets.values())) * 34)
+        flag = "" if n >= 20 else "   <- thin"
+        print(f"   {k:>10}  {n:>4}  {bar}{flag}")
     if len(chosen) < args.count:
         print(f"[note] the space of coherent combinations is smaller than "
               f"{args.count} under these constraints")

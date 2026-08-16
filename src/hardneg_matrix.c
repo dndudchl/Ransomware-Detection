@@ -88,7 +88,19 @@
 #define GENERATE 0
 #endif
 #ifndef SCOPE
-#define SCOPE 1         /* 1 user decoys, 2 Program Files, 3 walk C:\ */
+/* 1 user decoys   2 Program Files   3 walk C:\   4 AppData   5 mixed
+ *
+ * Where the destruction actually lands, measured across 400 ransomware
+ * analyses: Program Files 66.8%, AppData 12.9%, other 11.6%, the decoy
+ * folders 4.6%, elsewhere under Users 2.4%, Windows 1.7%. More than half of
+ * the runs with any file activity never reached a decoy at all.
+ *
+ * Scopes 1 to 3 cover the first, third and fourth of those. AppData was
+ * missing: walking from C:\ stops at depth four, and
+ * C:\Users\admin\AppData\Roaming\<app> is deeper than that. Scope 5
+ * spreads across several roots at once, which is what a family enumerating
+ * drives actually does -- it does not pick one directory and stay there. */
+#define SCOPE 1
 #endif
 #ifndef LIMIT
 #define LIMIT 0         /* 0 = no limit */
@@ -238,10 +250,41 @@ static void collect(void)
     const char *roots[] = { "C:\\Program Files", "C:\\Program Files (x86)", NULL };
     for (int i = 0; roots[i]; i++)
         walk(roots[i], 0, 3);
-#else
+#elif SCOPE == 3
     /* Alphabetical from the root, the way a family that never reaches the
      * user profile inside ten minutes does. */
     walk("C:\\", 0, 4);
+#elif SCOPE == 4
+    /* Application data, which carries nearly an eighth of the destruction in
+     * the ransomware set and is out of reach of the other scopes. */
+    {
+        const char *roots[] = { "%APPDATA%", "%LOCALAPPDATA%",
+                                "%ProgramData%", NULL };
+        for (int i = 0; roots[i]; i++)
+            if (ExpandEnvironmentStringsA(roots[i], dir, sizeof(dir)))
+                walk(dir, 0, 4);
+    }
+#else
+    /* Several roots in one run, in roughly the proportion the ransomware set
+     * distributes its destruction across them. Taking each in turn with its
+     * own depth gives a mix rather than exhausting the first one and never
+     * reaching the others, which is what a single deep walk does. */
+    {
+        struct { const char *root; int depth; } spread[] = {
+            { "C:\\Program Files",  3 },
+            { "%LOCALAPPDATA%",      3 },
+            { "%USERPROFILE%\\Documents", 3 },
+            { "%APPDATA%",           3 },
+            { "%USERPROFILE%\\Desktop",   3 },
+            { "C:\\ProgramData",    2 },
+            { NULL, 0 }
+        };
+        for (int i = 0; spread[i].root; i++) {
+            if (g_file_count >= MAX_FILES) break;
+            if (ExpandEnvironmentStringsA(spread[i].root, dir, sizeof(dir)))
+                walk(dir, 0, spread[i].depth);
+        }
+    }
 #endif
 }
 

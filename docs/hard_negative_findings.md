@@ -15,13 +15,57 @@ an argument, they printed usage and exited. On the dynamic features those
 rows are zero, so any feature that counts anything separates them perfectly,
 and a model trained against them learns to recognise a program that ran.
 
+Raising the count would not help, and the distribution shows why. Across a
+sample of 150:
+
+| API calls recorded | programs |
+|---|---|
+| none -- no process at all | 78 |
+| 1 - 99 | 13 |
+| 100 - 499 | 27 |
+| 500 - 4,999 | 20 |
+| 5,000 or more | **12** |
+
+The median encrypting run makes about 36,000 API calls. Eight percent of the
+benign set reaches five thousand. Lowering the threshold that decides whether
+a sample executed would move a few dozen rows from one column to another
+without making any of them a harder comparison: a program that made two
+hundred calls touched almost no files, and is as trivially separable as one
+that made none.
+
+Collecting more of the same would reproduce the same distribution. The
+negatives this study needs do not exist in a corpus of executables run
+without arguments, which is what led to building them.
+
 That is measurable. On the benign set, leave-one-family-out across 21
 families gives an AUC of 1.000, and restricting to the 301 benign runs the
 sandbox actually recorded activity for does not change it. The comparison is
 not hard enough to be informative in either form.
 
-So sixty-eight programs were written to be hard: as active as ransomware,
-touching the same decoy files, and doing something a person would ask for.
+So sixty-eight programs were written to be hard: touching the same decoy
+files as the ransomware does, in the same folders, and doing something a
+person would ask for.
+
+They did not turn out to be as active as ransomware, and the gap matters
+enough to state before anything else. Measured afterwards:
+
+| | API calls (median) | distinct paths (median) |
+|---|---|---|
+| ransomware, encrypting | 70,788 | 578 |
+| hard negatives | 1,305 | 95 |
+| benign that executed | 1,182 | 3 |
+
+By call count the hard negatives sit with the benign programs, not the
+ransomware -- fifty times quieter than what they were meant to be compared
+against. A small C program that reads a file and writes it back makes few
+API calls; a ransomware family also enumerates drives, queries the registry,
+checks for a debugger, spawns helpers and calls cryptographic routines, and
+most of the fifty-fold difference is that.
+
+What separates the hard negatives from the benign set is not how much they
+did but how many files they did it to: 95 distinct paths against 3. That
+turns out to be the whole story of the false positive rate, and is picked up
+again below.
 
 ## What was built
 
@@ -191,6 +235,91 @@ difference. Families implement their own cryptography, link it statically,
 or call it through paths the monitor does not hook, and the crypto axis
 should be reported as closed.
 
+## Where the destruction actually happens
+
+The decoy set is 176 files across Desktop, Documents and Downloads, and the
+first axis of the verdict asks how many of them were destroyed. Measured
+across 400 ransomware analyses, that axis is looking at a minority of the
+damage.
+
+Totalling every destructive event:
+
+| location | share of all events |
+|---|---|
+| C:\Program Files | 66.8% |
+| AppData | 12.9% |
+| elsewhere | 11.6% |
+| **the decoy folders** | **4.6%** |
+| elsewhere under Users | 2.4% |
+| C:\Windows | 1.7% |
+
+That total is misleading on its own, and the correction is worth making
+because the obvious reading of it is wrong. Per run, among the 244 analyses
+with at least twenty destructive events, the median share landing in Program
+Files is **0.0%**. More than half of the runs barely touch it. The 66.8% is
+produced by a small number of very active analyses -- one Phobos sample
+destroyed 6,354 files inside Acrobat DC on its own -- and says more about
+those than about the set.
+
+Per run, the destruction has no single home:
+
+| where the run concentrated its destruction | runs |
+|---|---|
+| Program Files | 37% |
+| elsewhere | 30% |
+| the decoy folders | 17% |
+| AppData | 16% |
+
+And of the 270 analyses with any file activity, 143 never touched a decoy
+and 127 did.
+
+### Why, is not established
+
+The natural explanation is the analysis window. A run that walks C:\
+alphabetically meets Program Files long before Users, and ten minutes is not
+long enough to finish, so the decoys are never reached. That would make the
+distribution an artefact of the timeout rather than a property of the
+malware.
+
+The data does not support it. Comparing the two groups:
+
+| | analyses | destructive events (median) | run length (median) |
+|---|---|---|---|
+| reached a decoy | 127 | 749 | 677 s |
+| never reached one | 143 | 441 | 676 s |
+
+If the timeout were cutting runs off mid-traversal, the group that failed to
+arrive should have been the busier one -- occupied elsewhere until the clock
+ran out. It is the quieter one, by a factor of nearly two, and both groups
+ran for the same length of time. Nothing was truncated; the runs that missed
+the decoys simply did less.
+
+Traversal order, family-specific targeting and the sheer size of Program
+Files relative to the decoy folders are all plausible and none is tested
+here. What can be said is the observation itself.
+
+### What follows from it either way
+
+The corroboration design is vindicated by this more than by anything else in
+the project. The other three axes -- append-renames, the ransom note, the
+shared replacement extension -- take no account of path, so they see the
+whole disk. Had the verdict rested on decoy destruction alone, as its first
+version did, it would have been blind to the 143 runs that destroyed things
+somewhere else. Those axes were each added in response to a particular miss;
+this is the first measurement of how much they carry.
+
+And the limitation of the decoy set is not the one previously recorded.
+"Only 176 files" suggests the fix is more files. The distribution suggests
+otherwise: the decoys are in the folders that ransomware, in this
+environment, reaches least often. Seeding decoys where the destruction goes
+would be the useful change, and an awkward one, since those directories
+belong to installed software.
+
+The hard negative variants were extended to match once this was measured.
+Scopes now cover the user profile, Program Files, an alphabetical walk from
+the root, AppData, and a spread across several roots at once, rather than
+the first three alone.
+
 ## Three limits of the decoy set, seen from here
 
 The decoy set is 176 files across Desktop and Documents, with no executables
@@ -279,6 +408,22 @@ data rather than an achievement of the algorithm.
 percent. Linear, ensemble and instance-based methods agree, so the false
 positives are not an artefact of any one inductive bias.
 
+And the comparison with the benign programs that executed makes the boundary
+precise. The two groups make almost the same number of API calls -- a median
+of 1,182 against 1,305 -- and are classified completely differently: 0.6%
+against 72%. The one thing separating them is the number of distinct files
+touched, 3 against 95.
+
+So the model is not thresholding on how much a program did. It is
+thresholding on how many files it did it to, and the line sits at somewhere
+under a hundred. Ransomware in this set touches a median of 578. A backup
+script, a bulk rename, an archiver, an indexer -- anything that opens a
+folder's worth of documents -- is on the wrong side of it.
+
+This is the same conclusion the feature importances point at from the other
+direction: n_paths alone accounts for 45% of the gain across 80 features.
+Two independent measurements agree on which column is making the decision.
+
 **The simpler models do better on them.** k-nearest neighbours is at 0.571
 against XGBoost's 0.716. The stronger learner fits the activity signal more
 sharply and pays for it on software that is active for legitimate reasons --
@@ -297,14 +442,24 @@ from a model with an AUC of 1.000.
 
 The headline figure and the false positive rate came from the same model in
 the same run. An AUC of 1.000 across 21 unseen families, and thirteen
-percent of active legitimate software classified as ransomware, are not in
-tension: the model learned to recognise a program that touches many files,
-which is sufficient for a benign set that mostly does not run, and which
-fires on every legitimate program that does.
+percent of harmless software classified as ransomware, are not in tension.
+The model learned to recognise a program that opens many distinct files.
+That is sufficient for a benign set which mostly does not run, and it fires
+on legitimate software that does.
+
+The boundary can be located. Benign programs that executed and hard
+negatives make the same number of API calls, 1,182 against 1,305 at the
+median, and are classified at 0.6% and 72%. The only thing between them is
+how many files each touched: 3 against 95. Ransomware touches 578. Whatever
+the model is measuring, the line falls closer to a backup script than to
+encryption.
 
 Nothing in the standard evaluation would show this. The benign set gives
-0.006. It takes negatives built to be as busy as the positives, and the
-count on its own is not enough either -- most of what was flagged had in
-fact destroyed the user's files. The number worth reporting is what remains
-after separating the cases where the detector was right, the cases where no
-detector could be right, and the cases where it could see nothing at all.
+0.006 and an AUC of 1.000, and both numbers are true. Finding the boundary
+took negatives that touch a folder's worth of files for an ordinary reason,
+and the count of how many were flagged is not enough on its own either --
+most of what was flagged had in fact destroyed the user's files, and a
+detector is supposed to fire on that. The number worth reporting is what
+remains after separating the cases where the detector was right, the cases
+where no detector could be right, and the cases where it could see nothing
+at all.

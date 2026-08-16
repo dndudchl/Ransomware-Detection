@@ -84,6 +84,9 @@ build 27 tool_accesschk   "accesschk reads every security descriptor"
 build 28 tool_streams     "streams and sigcheck walk the tree"
 build 29 tool_autoruns    "autorunsc and handle enumerate everything"
 build 30 tool_pskill      "pskill stops the processes holding locks"
+build 31 tool_contig      "Contig rewrites each file in place -- AvosLocker's trail"
+build 32 tool_strings     "strings reads every byte, writes nothing"
+build 33 tool_ru          "ru walks the registry recursively"
 
 echo
 n=$(ls -1 "$OUT"/tool_*.exe 2>/dev/null | wc -l)

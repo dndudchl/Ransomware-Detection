@@ -581,6 +581,71 @@ int main(void)
         }
     }
 
+#elif TOOL == 31
+    /* Contig: defragment individual files.
+     *
+     * To defragment a file the tool reads its contents and writes them back
+     * to a contiguous run, which at the filesystem layer is the same trail
+     * AvosLocker leaves -- same path, same name, contents rewritten. The
+     * difference is that one of them is signed by Microsoft and the user
+     * asked for it.
+     *
+     * stage2 makes this point with code written for the experiment. Contig
+     * makes it with a tool that shipped years before. */
+    say("Contig rewrites each decoy file in place");
+    collect_decoys();
+    say("  %d files", g_count);
+    {
+        int n = 0;
+        for (int i = 0; i < g_count && n < 80; i++) {
+            snprintf(cmd, sizeof(cmd),
+                     "\"%s\\Contig64.exe\" -accepteula -nobanner \"%s\"",
+                     SYSDIR, g_files[i]);
+            if (!run(cmd, 15000)) {
+                snprintf(cmd, sizeof(cmd),
+                         "\"%s\\Contig.exe\" -accepteula -nobanner \"%s\"",
+                         SYSDIR, g_files[i]);
+                run(cmd, 15000);
+            }
+            n++;
+        }
+        say("  %d files defragmented", n);
+    }
+
+#elif TOOL == 32
+    /* strings: read every byte of every file looking for printable runs.
+     * Read volume as high as anything in the ransomware set, writes of
+     * zero. */
+    say("strings across the user profile");
+    snprintf(cmd, sizeof(cmd),
+             "cmd.exe /c \"%s\\strings64.exe\" -accepteula -nobanner -s \"%s\" > nul",
+             SYSDIR, profile);
+    if (!run(cmd, 420000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "cmd.exe /c \"%s\\strings.exe\" -accepteula -nobanner -s \"%s\" > nul",
+                 SYSDIR, profile);
+        run(cmd, 420000);
+    }
+
+#elif TOOL == 33
+    /* ru: walk the registry recursively, the discovery step without any of
+     * the file work that usually accompanies it. */
+    say("ru across HKCU and HKLM software");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\ru64.exe\" -accepteula -nobanner HKCU", SYSDIR);
+    if (!run(cmd, 240000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\ru.exe\" -accepteula -nobanner HKCU", SYSDIR);
+        run(cmd, 240000);
+    }
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\ru64.exe\" -accepteula -nobanner HKLM\\SOFTWARE", SYSDIR);
+    if (!run(cmd, 240000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\ru.exe\" -accepteula -nobanner HKLM\\SOFTWARE", SYSDIR);
+        run(cmd, 240000);
+    }
+
 #else
 #error "unknown TOOL"
 #endif

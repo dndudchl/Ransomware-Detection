@@ -49,6 +49,9 @@
 
 #define MAX_FILES 300
 #define SEVENZIP  "C:\\Program Files\\7-Zip\\7z.exe"
+/* Sysinternals tools are staged alongside this binary rather than installed,
+ * so they sit wherever the analysis dropped them. */
+#define SYSDIR    "C:\\Users\\admin\\AppData\\Local\\Temp"
 #define DEFENDER  "C:\\Program Files\\Windows Defender\\MpCmdRun.exe"
 #define ARCHIVE_PASSWORD "archive-2026"
 
@@ -458,6 +461,125 @@ int main(void)
     run("\"C:\\Program Files\\Windows Media Player\\wmplayer.exe\"", 15000);
     Sleep(25000);
     run("cmd.exe /c taskkill /f /im iexplore.exe /im wmplayer.exe /t", 60000);
+
+#elif TOOL == 25
+    /* sdelete on the decoy documents.
+     *
+     * This is the sharpest case in the set. The tool exists to make a file
+     * unrecoverable: it overwrites the contents, several times, and then
+     * removes the entry. That is the trail m7_wipe was written to imitate,
+     * and here it is produced by a binary Microsoft signs and distributes.
+     *
+     * If the detector fires, it is a false positive on the administrator's
+     * own toolkit. If it does not, then overwriting and deleting every
+     * document in a folder is not sufficient to be called ransomware, which
+     * is a claim the ransomware results would struggle to support. */
+    say("sdelete on the decoy documents");
+    collect_decoys();
+    say("  %d files", g_count);
+    {
+        int n = 0;
+        for (int i = 0; i < g_count && n < 60; i++) {
+            snprintf(cmd, sizeof(cmd),
+                     "\"%s\\sdelete64.exe\" -accepteula -p 2 -nobanner \"%s\"",
+                     SYSDIR, g_files[i]);
+            if (!run(cmd, 20000)) {
+                snprintf(cmd, sizeof(cmd),
+                         "\"%s\\sdelete.exe\" -accepteula -p 2 -nobanner \"%s\"",
+                         SYSDIR, g_files[i]);
+                run(cmd, 20000);
+            }
+            n++;
+        }
+        say("  %d files passed to sdelete", n);
+    }
+
+#elif TOOL == 26
+    /* du: walk the whole profile measuring directory sizes. Opens
+     * everything, changes nothing, and produces read volume comparable to a
+     * family enumerating its targets. */
+    say("du across the user profile");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\du64.exe\" -accepteula -nobanner -l 6 \"%s\"", SYSDIR, profile);
+    if (!run(cmd, 420000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\du.exe\" -accepteula -nobanner -l 6 \"%s\"", SYSDIR, profile);
+        run(cmd, 420000);
+    }
+
+#elif TOOL == 27
+    /* accesschk: read the security descriptor of every file in the tree. */
+    say("accesschk across the user profile");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\accesschk64.exe\" -accepteula -nobanner -s \"%s\"",
+             SYSDIR, profile);
+    if (!run(cmd, 420000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\accesschk.exe\" -accepteula -nobanner -s \"%s\"",
+                 SYSDIR, profile);
+        run(cmd, 420000);
+    }
+
+#elif TOOL == 28
+    /* streams and sigcheck: two more full-tree readers, run together so the
+     * volume is comparable to the destructive variants. */
+    say("streams and sigcheck across the profile");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\streams64.exe\" -accepteula -nobanner -s \"%s\"",
+             SYSDIR, profile);
+    if (!run(cmd, 240000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\streams.exe\" -accepteula -nobanner -s \"%s\"",
+                 SYSDIR, profile);
+        run(cmd, 240000);
+    }
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\sigcheck64.exe\" -accepteula -nobanner -s -q \"%s\"",
+             SYSDIR, profile);
+    if (!run(cmd, 240000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\sigcheck.exe\" -accepteula -nobanner -s -q \"%s\"",
+                 SYSDIR, profile);
+        run(cmd, 240000);
+    }
+
+#elif TOOL == 29
+    /* autoruns and handle: registry-wide and process-wide enumeration, the
+     * discovery half of what a family does before it starts. */
+    say("autoruns and handle");
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\autorunsc64.exe\" -accepteula -nobanner -a * -c", SYSDIR);
+    if (!run(cmd, 300000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\autorunsc.exe\" -accepteula -nobanner -a * -c", SYSDIR);
+        run(cmd, 300000);
+    }
+    snprintf(cmd, sizeof(cmd),
+             "\"%s\\handle64.exe\" -accepteula -nobanner -a", SYSDIR);
+    if (!run(cmd, 120000)) {
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\handle.exe\" -accepteula -nobanner -a", SYSDIR);
+        run(cmd, 120000);
+    }
+
+#elif TOOL == 30
+    /* pskill and pssuspend: stopping other processes, which is the
+     * preparation step a family performs to release file locks. Same trail,
+     * signed by Microsoft. */
+    say("pskill and pssuspend on lock holders");
+    run("cmd.exe /c start \"\" notepad.exe", 10000);
+    run("cmd.exe /c start \"\" mspaint.exe", 10000);
+    Sleep(15000);
+    for (int i = 0; i < 2; i++) {
+        const char *target = i ? "mspaint.exe" : "notepad.exe";
+        snprintf(cmd, sizeof(cmd),
+                 "\"%s\\pskill64.exe\" -accepteula -nobanner %s", SYSDIR, target);
+        if (!run(cmd, 30000)) {
+            snprintf(cmd, sizeof(cmd),
+                     "\"%s\\pskill.exe\" -accepteula -nobanner %s", SYSDIR, target);
+            run(cmd, 30000);
+        }
+    }
 
 #else
 #error "unknown TOOL"

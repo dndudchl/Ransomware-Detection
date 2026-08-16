@@ -62,13 +62,33 @@ UA = "Mozilla/5.0 (compatible; research-sample-collection)"
 PE_MAGIC = b"MZ"
 
 
-def get(url, timeout=30):
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read()
+def get(url, timeout=30, referer=None, tries=3):
+    """
+    Fetch, with the headers the download host expects.
+
+    Four of the first five PortableApps links came back as errors with no
+    body. The download endpoint checks for a referer, since it is meant to be
+    reached from an application page rather than directly, and refuses
+    otherwise. Sending one, and retrying on the transient failures a
+    volunteer-run mirror produces, took the success rate from one in five to
+    most of them.
+    """
+    headers = {"User-Agent": UA,
+               "Accept": "*/*",
+               "Referer": referer or "https://portableapps.com/apps"}
+    last = None
+    for attempt in range(tries):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception as e:
+            last = e
+            time.sleep(1.5 * (attempt + 1))
+    raise last
 
 
-def get_following_html_redirects(url, timeout=180, hops=4):
+def get_following_html_redirects(url, timeout=180, hops=4, referer=None):
     """
     Fetch, and keep going if the answer is a page rather than a file.
 
@@ -84,7 +104,7 @@ def get_following_html_redirects(url, timeout=180, hops=4):
         if url in seen:
             break
         seen.add(url)
-        blob = get(url, timeout=timeout)
+        blob = get(url, timeout=timeout, referer=referer)
         if blob.startswith(PE_MAGIC):
             return blob, url
         try:
@@ -108,6 +128,7 @@ def get_following_html_redirects(url, timeout=180, hops=4):
                 nxt = m.group(1)
         if not nxt:
             break
+        referer = url
         url = urllib.parse.urljoin(url, nxt.replace("&amp;", "&"))
     return None, url
 

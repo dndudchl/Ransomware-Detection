@@ -73,6 +73,19 @@ echo "process termination on its own"
 build 23 tool_taskkill    "kill lock holders and stop services, nothing else"
 
 echo
+echo "Sysinternals with arguments -- the tools do nothing without them"
+echo "  Staged alongside these wrappers, which invoke them against the decoy"
+echo "  set. Every one is signed by Microsoft, and sdelete in particular does"
+echo "  what m7_wipe was written to imitate: overwrite the contents, then"
+echo "  remove the file."
+build 25 tool_sdelete     "sdelete -p 2 on the decoy documents"
+build 26 tool_du          "du across the whole profile"
+build 27 tool_accesschk   "accesschk reads every security descriptor"
+build 28 tool_streams     "streams and sigcheck walk the tree"
+build 29 tool_autoruns    "autorunsc and handle enumerate everything"
+build 30 tool_pskill      "pskill stops the processes holding locks"
+
+echo
 n=$(ls -1 "$OUT"/tool_*.exe 2>/dev/null | wc -l)
 echo "built $n tool wrappers into $OUT"
 echo

@@ -60,7 +60,7 @@
  *  2 copy then delete            7 overwrite with random, then delete
  *  3 rename only                 8 copy, keep the original
  *  4 many files into one         9 move to another directory
- *  5 write without reading                                              */
+ *  5 write without reading      10 scratch files, written then removed    */
 #define METHOD 2
 #endif
 #ifndef RENAME_MODE
@@ -517,6 +517,27 @@ int main(void)
         target_name(path, dropped, sizeof(dropped));
         if (write_file(dropped, (const BYTE *)NOTE_TEXT,
                        (DWORD)strlen(NOTE_TEXT))) did_write++;
+#elif METHOD == 10
+        /* Scratch files: written, used, removed. A compiler emitting object
+         * files, a converter staging output, an installer unpacking before it
+         * commits.
+         *
+         * Write and delete counts as high as an encrypting run produces, and
+         * nothing that was there before is touched. No other variant has this
+         * shape: METHOD 5 writes without deleting, and everything that deletes
+         * is deleting something it did not create. */
+        {
+            char scratch[MAX_PATH];
+            for (int k = 0; k < 3; k++) {
+                snprintf(scratch, sizeof(scratch), "%s.tmp%d", path, k);
+                if (write_file(scratch, (const BYTE *)NOTE_TEXT,
+                               (DWORD)strlen(NOTE_TEXT))) {
+                    did_write++;
+                    if (DeleteFileA(scratch)) did_delete++;
+                }
+            }
+        }
+
 #elif METHOD == 9
         {
             char dest_dir[MAX_PATH], dest[MAX_PATH];

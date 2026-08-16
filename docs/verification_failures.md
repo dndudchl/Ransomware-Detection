@@ -330,6 +330,50 @@ definition, and there is no file event that separates the two. What
 distinguishes them is whether somebody asked for it, and consent leaves no
 trace in a sandbox.
 
+## Failure 12 — imputing a missing value with the median of one class
+
+The first eleven were mistakes in the verdict logic. This one is in the
+modelling, and it is included because it has the same shape: a default that
+looks reasonable, applied to data whose structure makes it wrong.
+
+An anomaly detector was fitted on one class at a time, to ask whether the
+supervised model's labels were contributing anything. Most of the relational
+features cannot be computed for a run that touched no files -- there is no
+read-to-write overlap when nothing was read -- so those cells are empty, and
+the pipeline filled them with the column median before scaling.
+
+Fitted on ransomware, the AUC came out at **0.198**. Not close to chance:
+confidently backwards.
+
+The first explanation was that the median came from the fitted class, so
+every inert benign row was being rewritten into the most typical ransomware
+run in the data. That is a real hazard and the code was changed to fit the
+imputer on both classes. The AUC stayed at 0.195.
+
+The actual cause is a property of the method, found by reproducing it:
+
+| positive class | negative class | AUC fitted on positives |
+|---|---|---|
+| diffuse | compact, **inside** the spread | **0.00** |
+| diffuse | compact, outside the spread | 1.00 |
+| similar spread, separated | | 1.00 |
+
+Isolation Forest scores a point by how quickly random splits can separate it
+from everything else, and it treats the fitted class as the compact one.
+Here the fitted class is not compact. Activity across the 1,849 encrypting
+runs spans five hundred to two hundred thousand API calls over 105 families,
+while the benign set is a tight cluster of low values sitting inside that
+spread. A point in a tight cluster resists isolation whatever the cluster is
+made of, so the benign rows score as more typical of ransomware than most
+ransomware does.
+
+The row was kept rather than dropped. A detector that ranks confidently
+backwards is more informative than a missing line, and the reason it fails
+says something the supervised numbers do not: ransomware, in this feature
+space, is not one dense region. Fitting on benign instead gives 0.996 --
+matching the supervised model without ever seeing a ransomware sample, which
+is its own result.
+
 ## The common shape
 
 Every one of the four assumed that the world would arrive in a particular

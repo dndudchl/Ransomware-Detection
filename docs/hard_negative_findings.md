@@ -191,7 +191,7 @@ difference. Families implement their own cryptography, link it statically,
 or call it through paths the monitor does not hook, and the crypto axis
 should be reported as closed.
 
-## What the eight failures of the decoy set look like from here
+## Three limits of the decoy set, seen from here
 
 The decoy set is 176 files across Desktop and Documents, with no executables
 in it. Three consequences turned up in this experiment:
@@ -208,6 +208,90 @@ in it. Three consequences turned up in this experiment:
 A larger and more realistic decoy set is the single change that would most
 improve this work, and it requires rebuilding the guest image and reanalysing
 everything, which is why it is future work rather than a fix.
+
+## What the label definition does to two families
+
+Training with every ransomware run as a positive, rather than only those that
+encrypted, drops the AUC from 1.000 to 0.980 and raises the hard negative
+false positive rate from 0.78 to 0.90. Averages conceal where that comes
+from. Per family:
+
+| family | runs | TPR | executed |
+|---|---|---|---|
+| Qilin | 55 | **0.09** | 11% |
+| WannaCry | 33 | **0.09** | 9% |
+| GandCrab | 30 | 0.60 | 57% |
+| Conti | 169 | 0.78 | 80% |
+| LockBit | 179 | 0.99 | 90% |
+
+Two families are almost entirely missed, and the third column explains it.
+Of the 55 Qilin samples, 49 never executed; of the 33 WannaCry samples, 30
+did not. Median API call counts were 406 and 199, below the five hundred the
+verdict logic uses to decide a sample ran at all, and the median number of
+file paths touched was one.
+
+The model did not fail to generalise to these families. It was asked to
+identify, from behaviour, samples whose behaviour was not recorded. Among
+the six Qilin runs that did execute, five were detected.
+
+WannaCry has a specific reason: it queries a hardcoded domain on startup and
+exits if the domain resolves. The sandbox has internet access, the domain has
+been sinkholed since 2017, and so the sample terminates. Qilin's failures are
+less specific -- packing, missing arguments, or waiting on a command server
+that no longer answers.
+
+This is the cost of the broader label. Including runs that executed without
+doing anything puts 1,505 positives into the training set whose dynamic
+features are indistinguishable from the 1,262 benign programs that also did
+nothing, and the model's threshold moves to accommodate them. The narrower
+label avoids that and buys a perfect score by only ever being asked about
+samples that ran.
+
+Neither is the correct choice. A detector deployed in the world has to handle
+ransomware that has not triggered yet; a study of what encryption looks like
+cannot learn it from runs where no encryption occurred. Both are reported
+here because the gap between them is larger than the gap between any two
+feature sets tried.
+
+## Changing the classifier does not change the result
+
+An AUC of 1.000 alongside a false positive rate of 0.78 invites the question
+of whether gradient boosting is at fault. Four classifiers and two anomaly
+detectors, all under the same 21-fold family split:
+
+| approach | AUC | FP benign | FP hard | precision at 0.1% |
+|---|---|---|---|---|
+| XGBoost | 1.000 | 0.006 | 0.716 | 0.0014 |
+| random forest | 1.000 | 0.007 | 0.704 | 0.0014 |
+| logistic regression | 0.998 | 0.004 | 0.603 | 0.0017 |
+| k-nearest neighbours | 0.998 | 0.005 | 0.571 | 0.0017 |
+| one-class, fitted on benign | 0.996 | 0.050 | 0.686 | -- |
+| one-class, fitted on ransomware | 0.195 | 1.000 | 1.000 | -- |
+
+Three things follow.
+
+**k-nearest neighbours reaches 0.998.** It fits nothing; it finds the closest
+training example and copies its label. A problem solvable that way did not
+require a model, and the 1.000 from gradient boosting is a property of the
+data rather than an achievement of the algorithm.
+
+**Every classifier flags most of the hard negatives**, between 57 and 72
+percent. Linear, ensemble and instance-based methods agree, so the false
+positives are not an artefact of any one inductive bias.
+
+**The simpler models do better on them.** k-nearest neighbours is at 0.571
+against XGBoost's 0.716. The stronger learner fits the activity signal more
+sharply and pays for it on software that is active for legitimate reasons --
+the opposite of what a leaderboard would reward.
+
+**Fitting on benign alone reaches 0.996** without seeing a single ransomware
+sample. Whatever the labels contributed, it was not much: separating the two
+sets did not require knowing which was which.
+
+The last column is the one to sit with. At a base rate of one program in a
+thousand, and using the false positive rate on software that actually runs,
+precision is 0.0014. Roughly seven hundred alerts for each true detection,
+from a model with an AUC of 1.000.
 
 ## What to take from it
 

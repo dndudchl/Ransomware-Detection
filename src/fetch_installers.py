@@ -42,6 +42,7 @@ import hashlib
 import argparse
 import urllib.request
 import urllib.error
+import urllib.parse
 
 INDEX = "https://portableapps.com/apps"
 
@@ -65,6 +66,50 @@ def get(url, timeout=30):
     req = urllib.request.Request(url, headers={"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
+
+
+def get_following_html_redirects(url, timeout=180, hops=4):
+    """
+    Fetch, and keep going if the answer is a page rather than a file.
+
+    The PortableApps links go through an interstitial: the .paf.exe URL
+    returns HTML that starts the real download a moment later, either with a
+    meta refresh or a link to the mirror. Fetching the first response and
+    checking for MZ gets a 200 KB web page saved as an executable, which then
+    fails in the sandbox for reasons that have nothing to do with the
+    experiment.
+    """
+    seen = set()
+    for _ in range(hops):
+        if url in seen:
+            break
+        seen.add(url)
+        blob = get(url, timeout=timeout)
+        if blob.startswith(PE_MAGIC):
+            return blob, url
+        try:
+            text = blob[:200_000].decode("utf-8", "replace")
+        except Exception:
+            break
+
+        nxt = None
+        m = re.search(r'(?i)<meta[^>]+http-equiv=["\']?refresh["\']?[^>]+'
+                      r'content=["\']?[^"\';]*;\s*url=([^"\'>]+)', text)
+        if m:
+            nxt = m.group(1).strip()
+        if not nxt:
+            m = re.search(r'(?i)href=["\']([^"\']*?(?:sourceforge|osdn|'
+                          r'downloads?)[^"\']*?\.paf\.exe[^"\']*)', text)
+            if m:
+                nxt = m.group(1).strip()
+        if not nxt:
+            m = re.search(r'(?i)(https?://[^\s"\']+?\.paf\.exe[^\s"\']*)', text)
+            if m and m.group(1) not in seen:
+                nxt = m.group(1)
+        if not nxt:
+            break
+        url = urllib.parse.urljoin(url, nxt.replace("&amp;", "&"))
+    return None, url
 
 
 def discover(limit):
@@ -105,21 +150,33 @@ def discover(limit):
     return out
 
 
+def clean_name(url, index):
+    """A filename from the URL, which for these carries query parameters."""
+    tail = urllib.parse.urlparse(url).path.rsplit("/", 1)[-1]
+    if not tail.lower().endswith(".exe"):
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+        for key in ("f", "file", "filename"):
+            if key in qs and qs[key][0].lower().endswith(".exe"):
+                tail = qs[key][0].rsplit("/", 1)[-1]
+                break
+    tail = re.sub(r"[^A-Za-z0-9._-]", "_", tail)
+    return tail if tail.lower().endswith(".exe") else f"installer_{index:04d}.exe"
+
+
 def download(url, outdir, index):
-    name = url.rsplit("/", 1)[-1].split("?")[0]
-    if not name.lower().endswith(".exe"):
-        name = f"installer_{index:04d}.exe"
+    name = clean_name(url, index)
     path = os.path.join(outdir, name)
     if os.path.exists(path) and os.path.getsize(path) > 1024:
         return path, os.path.getsize(path), "already present"
     try:
-        blob = get(url, timeout=180)
+        blob, final = get_following_html_redirects(url)
     except Exception as e:
         return None, 0, f"{type(e).__name__}"
-    if not blob.startswith(PE_MAGIC):
-        # Usually an HTML error page served with a 200, which would otherwise
-        # end up in the sandbox as a sample that cannot run.
-        return None, len(blob), "not a PE file"
+    if blob is None:
+        return None, 0, "no executable behind the link"
+    if final != url:
+        name = clean_name(final, index)
+        path = os.path.join(outdir, name)
     with open(path, "wb") as f:
         f.write(blob)
     return path, len(blob), "ok"

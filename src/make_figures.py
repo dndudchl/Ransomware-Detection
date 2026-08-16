@@ -169,7 +169,7 @@ def fig_breakdown(counts, outdir):
 
 
 def fig_families(rows, outdir, show=14):
-    """rows: list of (family, n, auc, tpr)"""
+    """rows: list of (family, n, auc, tpr, ran_frac or None)"""
     if not rows:
         return None
     rows = sorted(rows, key=lambda r: r[3])
@@ -180,6 +180,7 @@ def fig_families(rows, outdir, show=14):
     rows = rows[:show]
     names = [r[0] for r in rows]
     tpr = [r[3] for r in rows]
+    ran = [r[4] if len(r) > 4 else None for r in rows]
     colours = [ACCENT if t < 0.5 else MID for t in tpr]
 
     fig, ax = plt.subplots(figsize=(6.2, 3.8))
@@ -187,17 +188,26 @@ def fig_families(rows, outdir, show=14):
     ax.barh(list(y), tpr, color=colours, height=0.62)
     ax.set_yticks(list(y))
     ax.set_yticklabels([f"{n}  ({r[1]})" for n, r in zip(names, rows)], fontsize=7.5)
-    ax.set_xlim(0, 1.02)
     ax.set_xlabel("true positive rate on the held-out family")
     ax.spines["left"].set_visible(False)
     ax.tick_params(axis="y", length=0)
-    for i, t in enumerate(tpr):
-        ax.text(t + 0.012, i, f"{t:.2f}", va="center", fontsize=7, color=INK)
+    # The rate on its own invites the wrong reading. A family whose samples
+    # mostly never ran has no behaviour to recognise, and the low score is
+    # the label definition showing through rather than the model failing, so
+    # the proportion that executed goes on the same line as the score.
+    for i, (t, frac) in enumerate(zip(tpr, ran)):
+        label = f"{t:.2f}"
+        if frac is not None:
+            label += f"    {frac:.0%} ran"
+        ax.text(t + 0.015, i, label, va="center", fontsize=7,
+                color=INK if frac is None or frac > 0.3 else ACCENT)
+    ax.set_xlim(0, 1.28)
     if hidden:
         ax.text(0.99, -0.20,
                 f"the remaining {hidden} families are all at {rest_min:.2f} or above",
                 transform=ax.transAxes, ha="right", fontsize=7.5, color=MID)
-    ax.set_title("Held out one family at a time: the weakest fourteen",
+    ax.set_title("Held out one family at a time, with every ransomware run\n"
+                 "counted as a positive whether or not it did anything",
                  loc="left", fontsize=10, pad=10)
     out = os.path.join(outdir, "fig3_families.png")
     fig.savefig(out)
@@ -331,8 +341,11 @@ def main():
             if p: made.append(p)
 
     if args.families:
-        rows = [(r["family"], int(r["n"]), float(r["auc"]), float(r["tpr"]))
-                for r in read(args.families)]
+        rows = []
+        for r in read(args.families):
+            frac = float(r["ran"]) if r.get("ran") not in (None, "") else None
+            rows.append((r["family"], int(r["n"]), float(r["auc"]),
+                         float(r["tpr"]), frac))
         p = fig_families(rows, outdir)
         if p: made.append(p)
 

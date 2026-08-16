@@ -168,16 +168,21 @@ def fig_breakdown(counts, outdir):
     return out
 
 
-def fig_families(rows, outdir):
+def fig_families(rows, outdir, show=14):
     """rows: list of (family, n, auc, tpr)"""
     if not rows:
         return None
     rows = sorted(rows, key=lambda r: r[3])
+    hidden = max(0, len(rows) - show)
+    rest_min = rows[show][3] if hidden else None
+    # Thirty-eight bars in one column crushes the labels into each other and
+    # the top two thirds are all near 1.0 anyway. The tail is the finding.
+    rows = rows[:show]
     names = [r[0] for r in rows]
     tpr = [r[3] for r in rows]
     colours = [ACCENT if t < 0.5 else MID for t in tpr]
 
-    fig, ax = plt.subplots(figsize=(6.2, 4.2))
+    fig, ax = plt.subplots(figsize=(6.2, 3.8))
     y = range(len(rows))
     ax.barh(list(y), tpr, color=colours, height=0.62)
     ax.set_yticks(list(y))
@@ -186,8 +191,13 @@ def fig_families(rows, outdir):
     ax.set_xlabel("true positive rate on the held-out family")
     ax.spines["left"].set_visible(False)
     ax.tick_params(axis="y", length=0)
-    ax.set_title("Two families are almost entirely missed by a model\n"
-                 "trained on the other thirty-six",
+    for i, t in enumerate(tpr):
+        ax.text(t + 0.012, i, f"{t:.2f}", va="center", fontsize=7, color=INK)
+    if hidden:
+        ax.text(0.99, -0.20,
+                f"the remaining {hidden} families are all at {rest_min:.2f} or above",
+                transform=ax.transAxes, ha="right", fontsize=7.5, color=MID)
+    ax.set_title("Held out one family at a time: the weakest fourteen",
                  loc="left", fontsize=10, pad=10)
     out = os.path.join(outdir, "fig3_families.png")
     fig.savefig(out)
@@ -210,24 +220,31 @@ def fig_three_splits(points, outdir):
 
     # Only the extremes get labels; a scatter with forty-six names on it is
     # a wall of text, and the ones that matter are the outliers.
+    # Three groups get named: the features that fall furthest below the
+    # diagonal (they were measuring activity), the ones that hold up on both
+    # (they describe behaviour), and the ones that do better against the
+    # harder negative than the easier one, which is the surprising corner.
     worst = sorted(points, key=lambda p: -(p[1] - p[2]))[:4]
     best = sorted(points, key=lambda p: -min(p[1], p[2]))[:3]
+    above = sorted([p for p in points if p[2] > p[1]],
+                   key=lambda p: -(p[2] - p[1]))[:3]
+    best = best + [p for p in above if p not in best]
     # Nudge each label off the last one placed nearby, so that features with
     # near-identical scores stay legible instead of printing on top of
     # each other.
     placed = []
     for name, a_b, a_h, _ in worst + best:
         dy = -3
-        while any(abs(a_b - px) < 0.03 and abs(a_h + dy / 250 - py) < 0.022
+        while any(abs(a_b - px) < 0.09 and abs(a_h + dy / 250 - py) < 0.024
                   for px, py in placed):
-            dy -= 11
+            dy -= 12
         ax.annotate(name, (a_b, a_h), textcoords="offset points",
                     xytext=(6, dy), fontsize=6.8, color=INK)
         placed.append((a_b, a_h + dy / 250))
 
     ax.set_xlabel("separates ransomware from inert benign software")
     ax.set_ylabel("separates ransomware from busy legitimate software")
-    ax.set_xlim(0.45, 1.02)
+    ax.set_xlim(0.45, 1.10)
     ax.set_ylim(0.45, 1.02)
     ax.text(0.52, 0.98, "on the line: the feature describes behaviour\n"
                         "below it: the feature was measuring activity",

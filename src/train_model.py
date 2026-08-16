@@ -174,6 +174,10 @@ def main():
                               "meaningful comparison.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default="/tmp/ablation.csv")
+    parser.add_argument("--hard-out", default="/tmp/hardneg_scores.csv",
+                         help="Per-variant record of how often each hard "
+                              "negative was flagged, which is what turns "
+                              "'44 of 68' into an account of why.")
     args = parser.parse_args()
 
     import numpy as np
@@ -236,6 +240,7 @@ def main():
         X = np.array([[to_float(r.get(c)) for c in feature_cols] for r in rows])
         per_fold = []
         hard_flagged = np.zeros(len(hard_idx))
+        hard_scores = []
 
         for k, fam in enumerate(fold_families):
             test_pos = [i for i in range(len(rows))
@@ -268,6 +273,7 @@ def main():
             pr = model.predict_proba(X[ran])[:, 1] if ran else np.array([])
 
             hard_flagged += (ph >= args.threshold).astype(float)
+            hard_scores.append(ph)
             per_fold.append({
                 "family": fam, "n_pos": len(test_pos), "auc": a,
                 "tpr": float((pt >= args.threshold).mean()),
@@ -280,8 +286,12 @@ def main():
             vals = [f[key] for f in per_fold if not math.isnan(f[key])]
             return sum(vals) / len(vals) if vals else float("nan")
 
+        mean_score = (np.mean(hard_scores, axis=0) if hard_scores
+                      else np.zeros(len(hard_idx)))
         return {
             "group": tag, "n_features": len(feature_cols),
+            "hard_flagged": hard_flagged, "hard_mean_score": mean_score,
+            "n_folds": len(per_fold),
             "auc": avg("auc"), "tpr": avg("tpr"),
             "fpr_benign": avg("fpr_benign"),
             "fpr_benign_ran": avg("fpr_benign_ran"),
@@ -325,6 +335,24 @@ def main():
                         f"{r['tpr']:.4f}", f"{r['fpr_benign']:.4f}",
                         f"{r['fpr_benign_ran']:.4f}", f"{r['fpr_hard']:.4f}"])
     print(f"\n[saved] {args.out}")
+
+    # Which hard negatives were flagged, not just how many. The count alone
+    # says the detector fails on active software; the list says which kinds
+    # of activity it cannot tell apart from encryption, and those are not the
+    # same failure.
+    full_for_hard = results[len(CUMULATIVE) - 1]
+    if hard_idx:
+        with open(args.hard_out, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["sample_id", "folds_flagged", "n_folds",
+                        "flag_rate", "mean_score"])
+            for pos, i in enumerate(hard_idx):
+                w.writerow([rows[i]["sample_id"],
+                            int(full_for_hard["hard_flagged"][pos]),
+                            full_for_hard["n_folds"],
+                            f"{full_for_hard['hard_flagged'][pos] / max(1, full_for_hard['n_folds']):.4f}",
+                            f"{full_for_hard['hard_mean_score'][pos]:.4f}"])
+        print(f"[saved] {args.hard_out}")
 
     full = results[len(CUMULATIVE) - 1]
     print(f"\nper-family, using all groups:")

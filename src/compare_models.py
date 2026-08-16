@@ -255,16 +255,28 @@ def main():
             fit_idx = [i for i in train if y[i] == fit_on]
             if len(fit_idx) < 30 or not test_pos or len(test_neg) < 5:
                 continue
-            pipe = make_pipeline(
-                SimpleImputer(strategy="median"), StandardScaler(),
-                IsolationForest(n_estimators=300, contamination=0.05,
-                                 random_state=args.seed, n_jobs=4))
-            pipe.fit(X[fit_idx])
-            forest = pipe.named_steps["isolationforest"]
+            # The preprocessing is fitted on the whole training set; only
+            # the forest sees one class.
+            #
+            # Fitting the imputer on one class as well looks natural and is
+            # badly wrong. A missing value means the feature could not be
+            # computed -- a program that touched no files has no read-to-write
+            # ratio -- and the benign set is full of them. Imputing those with
+            # the median of the ransomware training set rewrites every inert
+            # benign row into the most typical ransomware run in the data, so
+            # the detector scores them as more ransomware-like than ransomware
+            # is. Done that way this row came out at an AUC of 0.198: not
+            # uninformative, but confidently inverted.
+            prep = make_pipeline(SimpleImputer(strategy="median"),
+                                  StandardScaler())
+            prep.fit(X[train])
+            forest = IsolationForest(n_estimators=300, contamination=0.05,
+                                      random_state=args.seed, n_jobs=4)
+            forest.fit(prep.transform(X[fit_idx]))
 
             def ransomware_score(idx):
                 """Higher always means more likely ransomware."""
-                resembles_fitted = forest.score_samples(pipe[:-1].transform(X[idx]))
+                resembles_fitted = forest.score_samples(prep.transform(X[idx]))
                 return -resembles_fitted if fit_on == 0 else resembles_fitted
 
             aucs.append(auc_score(list(y[test]), list(ransomware_score(test))))

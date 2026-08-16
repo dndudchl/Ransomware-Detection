@@ -164,6 +164,14 @@ def main():
                               "its own fold")
     parser.add_argument("--min-calls", type=int, default=500)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--executed-only", action="store_true",
+                         help="Drop rows the sandbox never saw run. Four fifths "
+                              "of the benign set is inert, and a model given it "
+                              "reaches a perfect score by learning to tell a "
+                              "program that ran from one that did not. This "
+                              "restricts both classes to runs with recorded "
+                              "behaviour, which is a far harder and far more "
+                              "meaningful comparison.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default="/tmp/ablation.csv")
     args = parser.parse_args()
@@ -176,6 +184,10 @@ def main():
         for r in csv.DictReader(f):
             rows.append(r)
     print(f"{len(rows)} rows")
+    if args.executed_only:
+        before = len(rows)
+        rows = [r for r in rows if r.get("coverage") == "full"]
+        print(f"executed only: kept {len(rows)} of {before}")
 
     all_cols = list(rows[0].keys())
     grouped = {c for cols in GROUPS.values() for c in cols}
@@ -194,7 +206,12 @@ def main():
     y = np.array([int(r["y"]) for r in rows])
     source = [r["source"] for r in rows]
     family = [r["family_group"] or "(unknown)" for r in rows]
-    calls = np.array([to_float(r.get("n_calls")) for r in rows])
+    calls = np.array([to_float(r.get("n_calls") or r.get("total_calls"))
+                      for r in rows])
+    # coverage is set during extraction from whether the sandbox saw the
+    # sample run, and is present on every row, so it is the reliable way to
+    # ask that question even when a call count is missing.
+    executed = np.array([r.get("coverage") == "full" for r in rows])
 
     # Folds. Each family with enough members is held out in turn; the
     # negatives carry no family, so each is assigned to one fold at random and
@@ -247,7 +264,7 @@ def main():
             pn = model.predict_proba(X[test_neg])[:, 1]
             ph = model.predict_proba(X[hard_idx])[:, 1] if hard_idx else np.array([])
 
-            ran = [i for i in test_neg if calls[i] >= args.min_calls]
+            ran = [i for i in test_neg if executed[i]]
             pr = model.predict_proba(X[ran])[:, 1] if ran else np.array([])
 
             hard_flagged += (ph >= args.threshold).astype(float)

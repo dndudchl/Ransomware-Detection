@@ -215,6 +215,18 @@ def extract_preparation_features(report, lifecycle_events):
     before = [ts for ts, _c in prep_processes if ts <= first_destroy]
 
     features["n_prep_before_destroy"] = len(before)
+    # Measured, this predicts the opposite of what it was built to capture.
+    # Among runs of 25k-75k API calls, 69% of those that did NOT encrypt had
+    # prepared before their first destructive event, against 23% of those
+    # that did -- a 46-point gap over 1,035 runs.
+    #
+    # The reason is that encryption and preparation run concurrently, so a
+    # run that encrypts is already destroying files when its preparation
+    # starts. A run that stops short destroys only incidentally, and those
+    # few events necessarily come later. The feature therefore reads closer
+    # to "was destruction incidental" than to "did preparation come first",
+    # and a model given it will learn that preparing first means not
+    # encrypting.
     features["prep_precedes_destroy"] = int(bool(before))
     features["prep_to_first_destroy_sec"] = (
         round((first_destroy - min(before)).total_seconds(), 1) if before else "")

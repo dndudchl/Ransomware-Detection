@@ -41,7 +41,12 @@ Usage
 import csv
 import math
 import argparse
+import warnings
 from collections import Counter
+
+# One line per fold per model otherwise, which is several hundred lines of
+# the same message in front of the table.
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 CIRCULAR = {
     "destroyed_decoy_files", "append_renames", "distinct_rename_suffixes",
@@ -120,6 +125,18 @@ def main():
     print(f"{len(rows)} rows, {len(features)} features")
 
     X = np.array([[to_float(r.get(c)) for c in features] for r in rows])
+
+    # A column that is empty in every row cannot be imputed and carries no
+    # information; sklearn warns once per fit about it, which buries the
+    # output. Drop them here and say which they were, because a feature that
+    # was never computed at all is worth knowing about.
+    observed = ~np.all(np.isnan(X), axis=0)
+    if not observed.all():
+        dropped = [c for c, keep in zip(features, observed) if not keep]
+        print(f"[note] {len(dropped)} features are empty for every row and are "
+              f"dropped: {', '.join(dropped)}")
+        features = [c for c, keep in zip(features, observed) if keep]
+        X = X[:, observed]
     y = np.array([int(r["y"]) for r in rows])
     source = [r["source"] for r in rows]
     family = [r["family_group"] or "(unknown)" for r in rows]

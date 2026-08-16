@@ -192,7 +192,7 @@ def main():
 
     for name in ["xgboost", "random forest", "logistic regression",
                  "k-nearest neighbours"]:
-        aucs, tprs, fps, fph, precs = [], [], [], [], []
+        aucs, tprs, fps, fph, precs, precs_active = [], [], [], [], [], []
         for k, fam in enumerate(folds):
             train, test, test_pos, test_neg = split(k, fam)
             if not test_pos or len(test_neg) < 5:
@@ -213,11 +213,20 @@ def main():
             b = args.base_rate
             denom = tpr * b + fpr * (1 - b)
             precs.append(tpr * b / denom if denom > 0 else float("nan"))
+            # The same arithmetic against the hard negative rate. The benign
+            # figure assumes the software a detector meets in deployment is
+            # as inert as this benign set, four fifths of which never ran.
+            # Real machines run programs that touch files, and that is what
+            # the hard negatives are.
+            fh = fph[-1] if fph else float("nan")
+            d2 = tpr * b + fh * (1 - b)
+            precs_active.append(tpr * b / d2 if d2 > 0 else float("nan"))
 
         results.append({
             "approach": name, "auc": mean(aucs), "tpr": mean(tprs),
             "fpr_benign": mean(fps), "fpr_hard": mean(fph),
             "precision_at_base_rate": mean(precs),
+            "precision_vs_active": mean(precs_active),
         })
 
     # --- one-class, in both directions -------------------------------------
@@ -226,6 +235,18 @@ def main():
     # the training set. Fitted on one class only, it never sees the other, so
     # a high score here means the two classes are far apart in feature space
     # -- not that anything was learned about ransomware specifically.
+    # --- one-class, in both directions -------------------------------------
+    #
+    # Isolation Forest returns a score that is high for points resembling the
+    # training set and low for outliers. Fitted on one class only, it never
+    # sees the other.
+    #
+    # Orientation matters and is easy to get backwards. Fitted on benign, a
+    # ransomware run should look anomalous, so the ransomware score is the
+    # negated resemblance. Fitted on ransomware, a ransomware run should look
+    # familiar, so it is the resemblance itself. The threshold has to follow
+    # the same logic: flag what the fitted class rarely produces in the first
+    # case, and what it commonly produces in the second.
     for direction, fit_on in [("one-class, fit on benign", 0),
                               ("one-class, fit on ransomware", 1)]:
         aucs, tprs, fps, fph = [], [], [], []
@@ -234,52 +255,50 @@ def main():
             fit_idx = [i for i in train if y[i] == fit_on]
             if len(fit_idx) < 30 or not test_pos or len(test_neg) < 5:
                 continue
-            model = make_pipeline(
+            pipe = make_pipeline(
                 SimpleImputer(strategy="median"), StandardScaler(),
                 IsolationForest(n_estimators=300, contamination=0.05,
                                  random_state=args.seed, n_jobs=4))
-            model.fit(X[fit_idx])
-            # score_samples is higher for points that look like the training
-            # data. Orient so that a larger number always means "more likely
-            # ransomware", whichever class was fitted.
-            sign = -1.0 if fit_on == 0 else 1.0
-            s_test = sign * model.named_steps["isolationforest"].score_samples(
-                model[:-1].transform(X[test]))
-            aucs.append(auc_score(list(y[test]), list(s_test)))
+            pipe.fit(X[fit_idx])
+            forest = pipe.named_steps["isolationforest"]
 
-            # An operating point is needed for the rates. The 95th percentile
-            # of the fitted class is the conventional choice and is at least
-            # not tuned on the test data.
-            s_fit = sign * model.named_steps["isolationforest"].score_samples(
-                model[:-1].transform(X[fit_idx]))
-            cut = float(np.percentile(s_fit, 95 if fit_on == 0 else 5))
-            over = (lambda s: s >= cut) if fit_on == 0 else (lambda s: s >= cut)
-            sp = sign * model.named_steps["isolationforest"].score_samples(
-                model[:-1].transform(X[test_pos]))
-            sn = sign * model.named_steps["isolationforest"].score_samples(
-                model[:-1].transform(X[test_neg]))
-            tprs.append(float(over(sp).mean()))
-            fps.append(float(over(sn).mean()))
+            def ransomware_score(idx):
+                """Higher always means more likely ransomware."""
+                resembles_fitted = forest.score_samples(pipe[:-1].transform(X[idx]))
+                return -resembles_fitted if fit_on == 0 else resembles_fitted
+
+            aucs.append(auc_score(list(y[test]), list(ransomware_score(test))))
+
+            # An operating point that is not tuned on the test data: the
+            # score exceeded by 5% of the fitted class. Fitted on benign that
+            # is the top of the anomaly range; fitted on ransomware it is the
+            # bottom of the resemblance range, and in both cases the
+            # comparison is the same because the score was already oriented.
+            fitted = ransomware_score(fit_idx)
+            cut = float(np.percentile(fitted, 95 if fit_on == 0 else 5))
+
+            tprs.append(float((ransomware_score(test_pos) >= cut).mean()))
+            fps.append(float((ransomware_score(test_neg) >= cut).mean()))
             if hard_idx:
-                sh = sign * model.named_steps["isolationforest"].score_samples(
-                    model[:-1].transform(X[hard_idx]))
-                fph.append(float(over(sh).mean()))
+                fph.append(float((ransomware_score(hard_idx) >= cut).mean()))
 
         results.append({
             "approach": direction, "auc": mean(aucs), "tpr": mean(tprs),
             "fpr_benign": mean(fps), "fpr_hard": mean(fph),
             "precision_at_base_rate": float("nan"),
+            "precision_vs_active": float("nan"),
         })
 
     head = (f"{'approach':<28}{'AUC':>8}{'TPR':>8}{'FP benign':>11}"
-            f"{'FP hard':>9}{'precision':>11}")
+            f"{'FP hard':>9}{'prec/inert':>12}{'prec/active':>13}")
     print(head)
     print("-" * len(head))
     for r in results:
-        prec = ("-" if math.isnan(r["precision_at_base_rate"])
-                else f"{r['precision_at_base_rate']:.3f}")
+        def fmt(k):
+            return "-" if math.isnan(r[k]) else f"{r[k]:.4f}"
         print(f"{r['approach']:<28}{r['auc']:>8.3f}{r['tpr']:>8.3f}"
-              f"{r['fpr_benign']:>11.3f}{r['fpr_hard']:>9.3f}{prec:>11}")
+              f"{r['fpr_benign']:>11.3f}{r['fpr_hard']:>9.3f}"
+              f"{fmt('precision_at_base_rate'):>12}{fmt('precision_vs_active'):>13}")
 
     with open(args.out, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(results[0].keys()))
@@ -289,10 +308,12 @@ def main():
                         for k, v in r.items()})
     print(f"\n[saved] {args.out}")
 
-    print(f"\n  'precision' is what the same true and false positive rates give")
-    print(f"  when {args.base_rate:.1%} of programs are ransomware rather than the")
-    print(f"  roughly half that they are in these folds. The AUC does not move")
-    print(f"  when the base rate changes; the usefulness of the detector does.")
+    print(f"\n  Both precision columns assume {args.base_rate:.1%} of programs are")
+    print(f"  ransomware, against roughly half in these folds. 'prec/inert' uses")
+    print(f"  the false positive rate on the benign set, four fifths of which")
+    print(f"  never executed; 'prec/active' uses the rate on the hard negatives,")
+    print(f"  which is what software that actually runs looks like. The AUC is")
+    print(f"  identical in both cases.")
     print(f"\n  The two one-class rows never saw the other class. Where they")
     print(f"  reach the supervised score, the supervised model was not using")
     print(f"  its labels for anything the data did not already make obvious.")

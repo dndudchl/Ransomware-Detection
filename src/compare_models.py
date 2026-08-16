@@ -241,6 +241,22 @@ def main():
     # training set and low for outliers. Fitted on one class only, it never
     # sees the other.
     #
+    # Fitted on ransomware, this comes out inverted on the real data, and the
+    # reason is worth stating rather than hiding: the method assumes the
+    # fitted class is the compact one. Ransomware here is not. Activity spans
+    # five hundred to two hundred thousand API calls across a hundred and
+    # five families, while the benign set is a tight cluster of low values
+    # sitting inside that spread. A point inside a dense cluster is hard to
+    # isolate whatever the cluster is made of, so the benign rows score as
+    # more typical of ransomware than most ransomware does.
+    #
+    # Reproduced deliberately: with a diffuse positive class and a compact
+    # negative class placed inside it, the AUC goes to 0.00; placed outside
+    # it, 1.00. The row is kept because a detector that scores confidently
+    # backwards is a more useful thing to report than a missing line, and
+    # because it says something about the shape of the ransomware class that
+    # the supervised numbers do not.
+    #
     # Orientation matters and is easy to get backwards. Fitted on benign, a
     # ransomware run should look anomalous, so the ransomware score is the
     # negated resemblance. Fitted on ransomware, a ransomware run should look
@@ -329,6 +345,15 @@ def main():
     print(f"\n  The two one-class rows never saw the other class. Where they")
     print(f"  reach the supervised score, the supervised model was not using")
     print(f"  its labels for anything the data did not already make obvious.")
+    for r in results:
+        if r["approach"].startswith("one-class") and r["auc"] < 0.4:
+            print(f"\n  {r['approach']} scores below 0.5, which is not noise: it is")
+            print(f"  the ranking inverted. Isolation Forest treats the fitted class")
+            print(f"  as the compact one, and ransomware is the diffuse class here,")
+            print(f"  with the benign cluster sitting inside its spread. Points in a")
+            print(f"  tight cluster resist isolation, so benign reads as the more")
+            print(f"  typical ransomware. The method is reporting the shape of the")
+            print(f"  data, not a property of the samples.")
 
 
 if __name__ == "__main__":

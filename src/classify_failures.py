@@ -58,6 +58,9 @@ from collections import defaultdict
 INTENT = {
     # --- destroys what was there ---------------------------------------
     "m2_copydel":      ("destroys", "copy then delete, the 7z -sdel shape"),
+    # The same binary as m2_copydel, built under a second name so that the
+    # pair m6_crypto / m2_nocrypt differs in one step and nothing else.
+    "m2_nocrypt":      ("destroys", "copy then delete, no encryption [F of the pair]"),
     "m4_manytoone":    ("destroys", "many inputs folded into one, sources removed"),
     "m6_crypto":       ("destroys", "encrypts, then removes the original"),
     "m7_wipe":         ("destroys", "overwrites with random, then removes"),

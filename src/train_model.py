@@ -174,6 +174,21 @@ def main():
                               "meaningful comparison.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out", default="/tmp/ablation.csv")
+    parser.add_argument("--importance", action="store_true",
+                         help="Rank individual features three ways: by the gain "
+                              "the trees record, by how much shuffling the column "
+                              "costs the AUC, and by how much shuffling it changes "
+                              "the hard negative false positive rate. The third is "
+                              "the one that says which feature is responsible for "
+                              "calling active software ransomware.")
+    parser.add_argument("--leave-one-out", action="store_true",
+                         help="Retrain without each feature in turn. Expensive, and "
+                              "usually uninformative here: the features are heavily "
+                              "correlated, so removing one leaves the others to "
+                              "cover for it and nothing moves. Permutation "
+                              "importance measures the same thing without that "
+                              "problem, and without retraining.")
+    parser.add_argument("--importance-out", default="/tmp/importance.csv")
     parser.add_argument("--hard-out", default="/tmp/hardneg_scores.csv",
                          help="Per-variant record of how often each hard "
                               "negative was flagged, which is what turns "
@@ -300,6 +315,103 @@ def main():
             "hard_always": int((hard_flagged == len(per_fold)).sum()),
         }
 
+    def rank_features(feature_cols):
+        """
+        Three views of what the model is using.
+
+        gain is what the trees report: how much each split on that feature
+        improved the objective. It is free but it rewards features that were
+        available rather than features that were necessary, and it says
+        nothing about held-out behaviour.
+
+        permutation on AUC shuffles one column in the test fold and measures
+        what the score loses. Because no retraining happens, a feature whose
+        information is also carried elsewhere still shows a loss -- which is
+        the right answer to "is the model using this", even if the answer to
+        "would removing it hurt" is no.
+
+        permutation on the hard negative rate asks the question the rest of
+        this file has been circling: which column is responsible for calling
+        a busy, legitimate program ransomware. A feature that costs AUC when
+        shuffled but also lowers the false positive rate is doing both jobs,
+        and that trade is the thing worth reporting.
+        """
+        X = np.array([[to_float(r.get(c)) for c in feature_cols] for r in rows])
+        gain = defaultdict(float)
+        perm_auc = defaultdict(list)
+        perm_hard = defaultdict(list)
+        prng = np.random.default_rng(args.seed + 1)
+
+        for k, fam in enumerate(fold_families):
+            test_pos = [i for i in range(len(rows))
+                        if y[i] == 1 and family[i] == fam]
+            test_neg = [i for i in benign_idx if benign_fold[i] == k]
+            test = test_pos + test_neg
+            train = [i for i in range(len(rows))
+                     if i not in set(test) and i not in set(hard_idx)
+                     and not (y[i] == 1 and family[i] == fam)]
+            if not test_pos or len(test_neg) < 5:
+                continue
+
+            model = XGBClassifier(
+                n_estimators=300, max_depth=5, learning_rate=0.08,
+                subsample=0.9, colsample_bytree=0.9,
+                eval_metric="logloss", n_jobs=4, random_state=args.seed,
+                scale_pos_weight=max(1.0, (y[train] == 0).sum() / max(1, (y[train] == 1).sum())),
+            )
+            model.fit(X[train], y[train])
+
+            for c, g in zip(feature_cols, model.feature_importances_):
+                gain[c] += float(g)
+
+            base_auc = auc_score(list(y[test]), list(model.predict_proba(X[test])[:, 1]))
+            base_hard = float((model.predict_proba(X[hard_idx])[:, 1]
+                               >= args.threshold).mean()) if hard_idx else float("nan")
+
+            for j, c in enumerate(feature_cols):
+                Xt = X[test].copy()
+                Xt[:, j] = prng.permutation(Xt[:, j])
+                perm_auc[c].append(base_auc -
+                                   auc_score(list(y[test]),
+                                             list(model.predict_proba(Xt)[:, 1])))
+                if hard_idx:
+                    Xh = X[hard_idx].copy()
+                    Xh[:, j] = prng.permutation(Xh[:, j])
+                    shuffled = float((model.predict_proba(Xh)[:, 1]
+                                      >= args.threshold).mean())
+                    perm_hard[c].append(base_hard - shuffled)
+
+        n = max(1, len(fold_families))
+        table = []
+        for c in feature_cols:
+            table.append({
+                "feature": c,
+                "group": next(g for g in GROUPS if c in present[g]),
+                "gain": gain[c] / n,
+                "perm_auc": sum(perm_auc[c]) / max(1, len(perm_auc[c])),
+                "perm_hard": sum(perm_hard[c]) / max(1, len(perm_hard[c])),
+            })
+
+        table.sort(key=lambda t: -t["perm_auc"])
+        print(f"\n{'feature':<28}{'group':<12}{'gain':>8}{'AUC lost':>10}"
+              f"{'FP hard':>10}")
+        print("-" * 68)
+        for t in table[:25]:
+            print(f"{t['feature']:<28}{t['group']:<12}{t['gain']:>8.3f}"
+                  f"{t['perm_auc']:>10.4f}{t['perm_hard']:>10.4f}")
+
+        with open(args.importance_out, "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["feature", "group", "gain",
+                                               "perm_auc", "perm_hard"])
+            w.writeheader()
+            for t in table:
+                w.writerow({k: (f"{v:.5f}" if isinstance(v, float) else v)
+                            for k, v in t.items()})
+        print(f"\n[saved] {args.importance_out}")
+        print("  'FP hard' is the drop in hard negative false positives when the")
+        print("  column is shuffled. A positive number means the feature was")
+        print("  causing those false positives.")
+
     results = []
     print(f"\n{'':<16}{'feat':>5}{'AUC':>8}{'TPR':>8}"
           f"{'FP benign':>11}{'FP ran':>9}{'FP hard':>9}")
@@ -353,6 +465,26 @@ def main():
                             f"{full_for_hard['hard_flagged'][pos] / max(1, full_for_hard['n_folds']):.4f}",
                             f"{full_for_hard['hard_mean_score'][pos]:.4f}"])
         print(f"[saved] {args.hard_out}")
+
+    if args.importance:
+        all_cols = [c for g in GROUPS for c in present[g]]
+        rank_features(all_cols)
+
+    if args.leave_one_out:
+        all_cols = [c for g in GROUPS for c in present[g]]
+        print(f"\nretraining without each of {len(all_cols)} features in turn")
+        base = evaluate(all_cols, "all")
+        loo = []
+        for n, c in enumerate(all_cols, 1):
+            r = evaluate([x for x in all_cols if x != c], f"-{c}")
+            loo.append((c, base["auc"] - r["auc"], r["fpr_hard"] - base["fpr_hard"]))
+            print(f"\r   {n}/{len(all_cols)}", end="", flush=True)
+        print()
+        print(f"\n{'feature':<28}{'AUC lost':>10}{'FP hard gained':>16}")
+        for c, da, dh in sorted(loo, key=lambda x: -x[1])[:20]:
+            print(f"{c:<28}{da:>10.4f}{dh:>16.4f}")
+        print("\n  A feature can matter and still show nothing here, because "
+              "another\n  feature correlated with it takes over when it is removed.")
 
     full = results[len(CUMULATIVE) - 1]
     print(f"\nper-family, using all groups:")

@@ -116,8 +116,12 @@ def main():
         print("[!] no ransomware features found"); return
 
     rel = {r["task_id"]: r for r in read_csv(args.relational)}
+    # n_calls is kept: the feature tables record total_calls only for rows
+    # that were extracted with dynamic coverage, and the volume group and the
+    # executed-only filter both need a call count that is present for every
+    # row.
     rel_cols = [c for c in (next(iter(rel.values())).keys() if rel else [])
-                if c not in ("task_id", "n_calls")]
+                if c != "task_id"]
     print(f"relational features: {len(rel_cols)} columns for {len(rel)} runs")
 
     rows = []

@@ -81,7 +81,8 @@ def fig_ablation(ablation_path, outdir):
 
     fig, ax = plt.subplots(figsize=(6.2, 3.4))
     ax.plot(x, auc, "-o", color=ACCENT2, lw=1.6, ms=5, label="AUC")
-    ax.set_ylim(0.90, 1.005)
+    lo = min(auc)
+    ax.set_ylim(min(0.94, lo - 0.01), 1.005)
     ax.set_ylabel("AUC, 21-fold leave-one-family-out", color=ACCENT2)
     ax.tick_params(axis="y", labelcolor=ACCENT2)
     ax.set_xticks(list(x))
@@ -95,17 +96,35 @@ def fig_ablation(ablation_path, outdir):
     ax2.set_ylabel("false positive rate, hard negatives", color=ACCENT)
     ax2.tick_params(axis="y", labelcolor=ACCENT)
 
-    # The step where both jump is the finding; name it on the figure so the
-    # caption does not have to.
+    # Whichever step moves the two lines furthest apart is the finding, and
+    # it is not always the same step: with a larger hard negative set the
+    # rise in false positives arrives with volume, while the AUC saturates
+    # there too. Locating it from the data rather than naming it in advance
+    # keeps the figure honest when the numbers change.
     jump = max(range(1, len(rows)), key=lambda i: fp[i] - fp[i - 1])
-    ax2.annotate("adding volume features takes the score\nto 1.000 and the false "
-                 "positive rate to 0.78",
-                 xy=(jump, fp[jump]), xytext=(jump + 0.15, fp[jump] - 0.30),
+    ax2.annotate(f"{labels[jump]} takes the score to {auc[jump]:.3f}\n"
+                 f"and the false positive rate to {fp[jump]:.2f}",
+                 xy=(jump, fp[jump]),
+                 xytext=(jump + 0.1, max(0.08, fp[jump] - 0.28)),
                  fontsize=7.5, color=INK,
                  arrowprops=dict(arrowstyle="-", color=MID, lw=0.7))
 
-    ax.set_title("Accuracy and false positives rise in the same step",
-                 loc="left", fontsize=10, pad=10)
+    # The title follows the data. With a benign set that mostly does not
+    # run, the false positive rate climbs alongside the AUC and the point is
+    # that they move together. With a hard negative set large enough to
+    # matter, the AUC saturates while the false positive rate barely shifts,
+    # and the point becomes that ninety features bought almost nothing --
+    # which is the same finding seen from the other side.
+    span = max(fp) - min(fp)
+    gain = max(auc) - min(auc)
+    if fp[-1] > fp[0] + 0.05:
+        title = "Accuracy and false positives rise in the same step"
+    elif span < 0.2:
+        title = (f"The score goes from {min(auc):.3f} to {max(auc):.3f}; "
+                 f"the false positive\nrate moves {abs(fp[-1] - fp[0]):.3f}")
+    else:
+        title = "What each group of features changes"
+    ax.set_title(title, loc="left", fontsize=10, pad=10)
     out = os.path.join(outdir, "fig1_ablation.png")
     fig.savefig(out)
     plt.close(fig)
@@ -269,6 +288,61 @@ def fig_three_splits(points, outdir):
     return out
 
 
+def fig_threshold(bands, ransomware_median, outdir):
+    """
+    bands: list of (label, lower, upper, n, flagged)
+
+    Where the detector starts calling legitimate software ransomware.
+
+    The single false positive rate over a set of hard negatives is a
+    property of how that set was assembled. Half of ours are Sysinternals
+    tools run without arguments, which print their usage and exit; adding
+    more of those drives the figure towards zero while the model does
+    nothing differently. Split by how many distinct files each program
+    opened, the number stops describing the sample and starts describing the
+    detector.
+
+    It also does what no single figure can, which is locate the boundary.
+    """
+    if not bands:
+        return None
+    labels = [b[0] for b in bands]
+    ns = [b[3] for b in bands]
+    rates = [b[4] / b[3] if b[3] else 0 for b in bands]
+
+    fig, ax = plt.subplots(figsize=(6.2, 3.6))
+    x = range(len(bands))
+    colours = [ACCENT if r >= 0.5 else MID for r in rates]
+    ax.bar(list(x), rates, color=colours, width=0.6)
+    ax.set_xticks(list(x))
+    ax.set_xticklabels(labels)
+    ax.set_ylim(0, 1.12)
+    ax.set_ylabel("classified as ransomware")
+    ax.set_xlabel("distinct files the program opened")
+
+    # The count goes inside the bar where there is room and just above the
+    # axis where there is not, so it never lands on the tick label.
+    for i, (r, n) in enumerate(zip(rates, ns)):
+        ax.text(i, r + 0.03, f"{r:.2f}", ha="center", fontsize=8.5, color=INK)
+        if r > 0.18:
+            ax.text(i, r / 2, f"n={n}", ha="center", va="center",
+                    fontsize=8, color="white")
+        else:
+            ax.text(i, r + 0.10, f"n={n}", ha="center", fontsize=8, color=MID)
+
+    # Where the ransomware sits, so the reader can see that the line falls a
+    # long way short of it.
+    ax.text(0.99, 0.93,
+            f"ransomware median: {ransomware_median} files",
+            transform=ax.transAxes, ha="right", fontsize=8, color=MID)
+    ax.set_title("Legitimate software crosses the line at a few dozen files",
+                 loc="left", fontsize=10, pad=10)
+    out = os.path.join(outdir, "fig5_threshold.png")
+    fig.savefig(out)
+    plt.close(fig)
+    return out
+
+
 # ---------- data assembly ----------
 
 def load_breakdown(scores_path, map_path):
@@ -288,6 +362,40 @@ def load_breakdown(scores_path, map_path):
         f, t = counts.get(cat, (0, 0))
         counts[cat] = (f + (1 if float(r["flag_rate"]) >= 0.5 else 0), t + 1)
     return counts
+
+
+def load_bands(scores_path, modelling_path, threshold=0.5):
+    """Group the hard negatives by how many distinct paths each one opened."""
+    rate = {}
+    for r in read(scores_path):
+        try:
+            rate[r["sample_id"]] = float(r["flag_rate"])
+        except (KeyError, ValueError):
+            continue
+    rows = [r for r in read(modelling_path) if r.get("source") == "hardneg"]
+
+    edges = [(0, 10, "under 10"), (10, 50, "10-49"),
+             (50, 200, "50-199"), (200, 10 ** 9, "200+")]
+    out = []
+    for lo, hi, label in edges:
+        sel = []
+        for r in rows:
+            try:
+                v = float(r.get("n_paths") or 0)
+            except ValueError:
+                v = 0.0
+            if lo <= v < hi and r["sample_id"] in rate:
+                sel.append(r["sample_id"])
+        if sel:
+            hits = sum(1 for s in sel if rate[s] >= threshold)
+            out.append((label, lo, hi, len(sel), hits))
+
+    pos = [r for r in read(modelling_path) if r.get("y") == "1"]
+    vals = sorted(float(r["n_paths"]) for r in pos
+                  if (r.get("n_paths") or "").strip()
+                  and r["n_paths"].replace(".", "", 1).isdigit())
+    median = int(vals[len(vals) // 2]) if vals else 0
+    return out, median
 
 
 def load_three_splits(relational_path, results_path):
@@ -323,6 +431,8 @@ def main():
     parser.add_argument("--families", help="CSV with family,n,auc,tpr")
     parser.add_argument("--relational")
     parser.add_argument("--results")
+    parser.add_argument("--modelling",
+                         help="modelling.csv, for the file-count bands")
     parser.add_argument("--outdir", default="../results/figures")
     args = parser.parse_args()
 
@@ -347,6 +457,11 @@ def main():
             rows.append((r["family"], int(r["n"]), float(r["auc"]),
                          float(r["tpr"]), frac))
         p = fig_families(rows, outdir)
+        if p: made.append(p)
+
+    if args.hard_scores and args.modelling:
+        bands, median = load_bands(args.hard_scores, args.modelling)
+        p = fig_threshold(bands, median, outdir)
         if p: made.append(p)
 
     if args.relational and args.results:

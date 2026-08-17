@@ -145,41 +145,48 @@ def main():
               + " ".join(missing))
         return
 
-    # Weighted towards the formats the guest has a real handler for, since a
-    # .txt opened in Notepad does far less than a .docx opened in Word.
-    kinds = (["docx"] * 10 + ["xlsx"] * 8 + ["pptx"] * 3
-             + ["csv"] * 3 + ["rtf"] * 2 + ["txt"] * 2)
+    # The grid, enumerated rather than sampled.
+    #
+    # Drawing format and size at random leaves the coverage to luck: a run of
+    # 25 came out with eleven spreadsheets and five documents, which is not
+    # enough Word files to cover the four sizes. There are only twenty
+    # combinations, so cycling through them in order covers every one before
+    # any repeats, and the count decides how many times round.
+    GRID = (
+        [("docx", (p, t)) for p, t in [(3, 0), (20, 1), (80, 3), (200, 6)]]
+        + [("xlsx", (sh, r)) for sh, r in [(1, 20), (1, 500), (3, 200), (5, 2000)]]
+        + [("pptx", (n,)) for n in (3, 10, 30)]
+        + [("csv", (n,)) for n in (50, 1000, 20000)]
+        + [("rtf", (n,)) for n in (5, 40, 150)]
+        + [("txt", (n,)) for n in (10, 100, 800)]
+    )
 
     rows = []
     for i in range(args.count):
-        kind = rng.choice(kinds)
+        kind, spec = GRID[i % len(GRID)]
         name = f"doc_{i:04d}.{kind}"
         path = os.path.join(outdir, name)
         try:
             if kind == "docx":
-                paras, tables = rng.choice([(3, 0), (20, 1), (80, 3), (200, 6)])
+                paras, tables = spec
                 make_docx(path, paras, tables)
                 size = f"{paras} paragraphs, {tables} tables"
             elif kind == "xlsx":
-                sheets, r = rng.choice([(1, 20), (1, 500), (3, 200), (5, 2000)])
+                sheets, r = spec
                 make_xlsx(path, sheets, r)
                 size = f"{sheets} sheets, {r} rows"
             elif kind == "pptx":
-                n = rng.choice([3, 10, 30])
-                make_pptx(path, n)
-                size = f"{n} slides"
+                make_pptx(path, spec[0])
+                size = f"{spec[0]} slides"
             elif kind == "csv":
-                r = rng.choice([50, 1000, 20000])
-                make_csv(path, r)
-                size = f"{r} rows"
+                make_csv(path, spec[0])
+                size = f"{spec[0]} rows"
             elif kind == "rtf":
-                n = rng.choice([5, 40, 150])
-                make_rtf(path, n)
-                size = f"{n} paragraphs"
+                make_rtf(path, spec[0])
+                size = f"{spec[0]} paragraphs"
             else:
-                n = rng.choice([10, 100, 800])
-                make_txt(path, n)
-                size = f"{n} paragraphs"
+                make_txt(path, spec[0])
+                size = f"{spec[0]} paragraphs"
         except Exception as e:
             print(f"[!] {name}: {type(e).__name__}: {e}")
             continue
@@ -197,8 +204,10 @@ def main():
     from collections import Counter
     total = sum(r["bytes"] for r in rows)
     print(f"{len(rows)} documents, {total / 1e6:.1f} MB")
-    for k, n in Counter(r["kind"] for r in rows).most_common():
+    for k, n in sorted(Counter(r["kind"] for r in rows).items()):
         print(f"   {k:<6}{n:>5}")
+    shapes = Counter((r["kind"], r["shape"]) for r in rows)
+    print(f"   {len(shapes)} of {len(GRID)} combinations covered")
     print(f"[saved] {manifest}")
     print("\nSubmit these the same way as everything else. The program the")
     print("sandbox records will be the registered handler, not the file.")

@@ -114,6 +114,12 @@ def main():
     parser.add_argument("--features-dir", default="../data/features")
     parser.add_argument("--relational", required=True)
     parser.add_argument("--out", default="../data/features/modelling.csv")
+    parser.add_argument("--hardneg-names",
+                         help="CSV of sample_id,filename for the hard "
+                              "negatives. Without it the split cannot group "
+                              "a variant with its siblings, because the "
+                              "sample id is a task number and carries no "
+                              "information about what the program was.")
     parser.add_argument("--hardneg-manifest", nargs="*", default=[],
                          help="Manifests carrying a category column, used to "
                               "decide which hard negatives may be trained on")
@@ -223,6 +229,17 @@ def main():
     # would be tested on what it had already seen. Splitting on the kind asks
     # whether training on some kinds of active software generalises to
     # others, which is the question worth asking.
+    # What each hard negative actually was. The sample id is the sandbox task
+    # number, which says nothing about the program, so without this the split
+    # is random and a variant can be trained on at one size and tested at
+    # another -- which is testing on what was already seen.
+    name_of = {}
+    if args.hardneg_names:
+        for r in read_csv(os.path.expanduser(args.hardneg_names)):
+            if r.get("sample_id") and r.get("filename"):
+                name_of[r["sample_id"]] = r["filename"]
+        print(f"hard negative names: {len(name_of)} resolved")
+
     category = {}
     for path in args.hardneg_manifest:
         for r in read_csv(os.path.expanduser(path)):
@@ -233,13 +250,22 @@ def main():
         print(f"hard negative categories: {len(category)} described")
 
     def kind_of(sample_id):
-        """A key that groups a variant with its own size and repeat siblings."""
-        core = sample_id.lstrip("H").lstrip("N")
-        parts = [p for p in core.split("_") if p]
-        # xc_D_l200_rand_r3 -> xc_D_rand ; drop the volume and the repeat
-        keep = [p for p in parts if not p.startswith(("l", "r"))
-                or not p[1:].isdigit()]
-        return "_".join(keep[:3]) if keep else core
+        """
+        A key that groups a variant with its siblings.
+
+        Siblings are the same program at another size or another repeat:
+        xc_D_l200_rand_r3 and xc_D_l1000_rand_r0 do the same thing to
+        different numbers of files. Training on one and testing on the other
+        measures nothing, so the volume and the repeat are dropped from the
+        key and what remains -- the shape, the toolchain, the traversal
+        order -- decides the group.
+        """
+        base = name_of.get(sample_id, sample_id)
+        base = os.path.splitext(base)[0]
+        parts = [p for p in base.split("_") if p]
+        keep = [p for p in parts
+                if not (len(p) > 1 and p[0] in "lr" and p[1:].isdigit())]
+        return "_".join(keep[:3]) if keep else base
 
     n_train = 0
     if args.hardneg_train_frac > 0:
@@ -247,8 +273,9 @@ def main():
         for r in deduped:
             if r["source"] != "hardneg":
                 continue
-            name = r["sample_id"].lstrip("H").lstrip("N")
-            cat = category.get(name, "")
+            base = os.path.splitext(name_of.get(r["sample_id"],
+                                                  r["sample_id"]))[0]
+            cat = category.get(base, "")
             if not cat:
                 # No manifest entry: fall back to whether the run destroyed
                 # anything the sandbox recorded. Conservative -- anything

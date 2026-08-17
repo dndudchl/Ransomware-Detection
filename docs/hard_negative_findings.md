@@ -201,6 +201,50 @@ This is the same shape as the BlackBasta sample that set `bcdedit
 window. The detector is not wrong about what it saw. The behaviour did not
 happen where it was looking.
 
+### And a third, found by accident
+
+Installers were added to the set late, on the reasoning that unpacking a
+program writes hundreds of files for a reason nobody would question. The
+first one analysed appeared to do almost nothing: five write events, seventeen
+distinct paths, finished in ninety seconds. The conclusion drawn was that the
+silent-install switch had not worked and the installer had exited at its
+first dialog.
+
+The report's own summary said otherwise -- 437 files under
+`C:\NvuPortable` -- so the raw call log was checked, which is the only
+place in a CAPE report that is not already an interpretation:
+
+| | count |
+|---|---|
+| `NtCreateFile` on those paths, `GENERIC_WRITE`, `FILE_OVERWRITE_IF` | **437** |
+| `NtWriteFile` anywhere in the run | **0** |
+| write events in `behavior.enhanced` | **5** |
+
+The installation happened. The files were created and their contents
+replaced. The monitor recorded every open and none of the writes, because
+NSIS moves the data through a path the hook does not cover, and the enhanced
+event list is built from write calls that never occurred.
+
+Every feature in this study is computed from `behavior.enhanced`. So the
+question became whether the same gap runs through the ransomware set, which
+would make the whole feature table an undercount. Comparing the enhanced path
+count against files opened with write access, directly from the calls:
+
+| | enhanced ÷ opened-for-write |
+|---|---|
+| ransomware | 1.25 |
+| hard negatives | 2.01 |
+
+Above one in both cases, because enhanced also counts reads. The ransomware
+measurements are sound and nothing needed recomputing. The gap is specific to
+installers, and specific to how one packaging system writes files.
+
+It belongs with the other two because it has the same shape: the detector is
+not wrong about what it saw, and what it saw was not what happened. An
+installer that unpacks a program is invisible to the same degree that
+`cipher /e` is, for an unrelated reason, and no amount of work on the
+features would recover either.
+
 ### The one that cannot be separated
 
 `stage2` reads each decoy file and writes the same bytes back to the same

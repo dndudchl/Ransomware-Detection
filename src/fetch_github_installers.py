@@ -96,9 +96,23 @@ PROJECTS = [
 ]
 
 INSTALLER = re.compile(r"(?i)\.(exe|msi)$")
-# Debug symbols and portable zips carry the same extension in some projects
+# Debug symbols and portable builds carry the same extension in some projects
 # but are not installers.
 SKIP = re.compile(r"(?i)(symbols|pdb|debug|portable|\.zip\.exe$|sha256|\.sig$)")
+# The guest is x64 Windows 10. An arm64 build will not start at all, and
+# choosing by size picks them out reliably, since they are usually the
+# smallest asset in a release. A 32-bit build is fine -- it runs under WOW64.
+WRONG_ARCH = re.compile(r"(?i)(arm64|aarch64|_arm\b|-arm\b|\.arm\.)")
+
+
+def arch_rank(name):
+    """Prefer the build most likely to run: x64, then x86, then unmarked."""
+    low = name.lower()
+    if any(k in low for k in ("x64", "amd64", "win64", "64-bit", "64bit")):
+        return 0
+    if any(k in low for k in ("x86", "win32", "32-bit", "32bit", "ia32")):
+        return 1
+    return 2
 
 
 def get(url, timeout=60, token=None):
@@ -118,19 +132,26 @@ def assets_for(repo, token, max_mb):
     except Exception as e:
         return [], type(e).__name__
 
-    out = []
+    out, rejected = [], []
     for a in data.get("assets", []):
         name = a.get("name", "")
-        if not INSTALLER.search(name) or SKIP.search(name):
-            continue
         size = a.get("size", 0)
-        if size > max_mb * 1e6 or size < 50_000:
-            continue
+        if not INSTALLER.search(name):
+            rejected.append((name, "not exe or msi")); continue
+        if SKIP.search(name):
+            rejected.append((name, "portable or symbols")); continue
+        if WRONG_ARCH.search(name):
+            rejected.append((name, "arm build")); continue
+        if size > max_mb * 1e6:
+            rejected.append((name, f"{size/1e6:.0f} MB, over the cap")); continue
+        if size < 50_000:
+            rejected.append((name, "too small to be an installer")); continue
         out.append((name, a.get("browser_download_url"), size))
-    # One per project: several architectures of the same installer behave
-    # identically and would only inflate the count.
-    out.sort(key=lambda x: x[2])
-    return out[:1], data.get("tag_name", "")
+    # One per project. Sorted by architecture first so that a runnable build
+    # is preferred over a smaller one that cannot start, then by size to keep
+    # the analysis window manageable.
+    out.sort(key=lambda x: (arch_rank(x[0]), x[2]))
+    return out[:1], (data.get("tag_name", ""), rejected)
 
 
 def main():
@@ -153,21 +174,28 @@ def main():
 
     found, missing = [], []
     for i, repo in enumerate(repos, 1):
-        assets, tag = assets_for(repo, args.token, args.max_mb)
+        assets, info = assets_for(repo, args.token, args.max_mb)
+        tag, rejected = info if isinstance(info, tuple) else (info, [])
         if assets:
             for name, url, size in assets:
                 found.append((repo, name, url, size, tag))
         else:
-            missing.append((repo, tag))
+            missing.append((repo, tag, rejected))
         if i % 10 == 0:
             print(f"\r   {i}/{len(repos)}  found {len(found)}", end="", flush=True)
         time.sleep(0.25)
     print(f"\r   {len(repos)}/{len(repos)}  found {len(found)}")
 
     if missing:
-        print(f"\n{len(missing)} projects had no installer asset:")
-        for repo, why in missing[:10]:
-            print(f"   {repo:<40}{why}")
+        print(f"\n{len(missing)} projects gave nothing usable:")
+        for repo, tag, rejected in missing:
+            if not rejected:
+                print(f"   {repo:<38}{tag}  (no assets matched)")
+            else:
+                first = rejected[0]
+                print(f"   {repo:<38}{tag}")
+                for name, why in rejected[:2]:
+                    print(f"      {name[:48]:<50}{why}")
 
     if args.list_only:
         print()

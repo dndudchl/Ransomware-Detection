@@ -69,22 +69,46 @@ PROTECTED_EXT = ("pyw", "py")
 # ransomware sample would count as a victim anyway.
 PROTECTED_DIR = "Temp"
 
+# One target, matching what the compiled grid walks, so a script and a C
+# variant of the same shape and volume can be compared directly. Varying the
+# scope here as well would mean a difference between them could be the
+# language or could be the directory, and neither could be ruled out.
+#
+# The profile covers Documents, Desktop, Downloads and AppData in one walk,
+# which is where the compiled variants find most of their files too.
 SCOPES = {
-    "documents": (r"$env:USERPROFILE\Documents", r"%USERPROFILE%\Documents"),
-    "desktop":   (r"$env:USERPROFILE\Desktop",   r"%USERPROFILE%\Desktop"),
-    "profile":   (r"$env:USERPROFILE",           r"%USERPROFILE%"),
-    "appdata":   (r"$env:LOCALAPPDATA",          r"%LOCALAPPDATA%"),
+    "profile": (r"$env:USERPROFILE", r"%USERPROFILE%"),
 }
 
+# The same four shapes the compiled grid uses, under the same names, so the
+# two sets line up cell for cell.
+#
+#   A  read only                      read_not_write 1.0
+#   C  read, write elsewhere, keep    rw_jaccard 0.0, nothing destroyed
+#   D  read, write elsewhere, delete  chain_read_destroy, writes
+#   K  read, delete, no write         chain_read_destroy, no writes
+#
+# D and K are the pair worth watching: identical destruction, and one writes
+# a replacement while the other does not. Whether that changes anything is a
+# question about relations rather than counts.
+#
+# Rename and scratch were dropped. Both are in the compiled grid as shapes I
+# and H, and repeating them here would spend the budget on shapes that
+# already have 60 and 90 variants rather than on the language comparison
+# these scripts exist for.
 METHODS = {
-    "read":      "read every file, change nothing",
-    "copy":      "write a copy beside each, originals kept",
-    "copydel":   "write a copy, then remove the original",
-    "rename":    "rename onto a shared extension",
-    "scratch":   "write temporary files, then remove them",
+    "A": "read every file, change nothing",
+    "C": "write a copy beside each, originals kept",
+    "D": "write a copy, then remove the original",
+    "K": "read each file, then remove it, writing nothing",
 }
 
-LIMITS = [10, 50, 0]     # 0 means no limit
+# Matching the compiled grid's lower three steps. The larger ones are left
+# to the compiled variants: PowerShell was measured taking the whole
+# ten-minute window to process 85 files, so a script asked for a thousand
+# would be cut off, and a variant that did less is not a variant that
+# behaved differently.
+LIMITS = [50, 200, 0]     # 0 means no limit
 
 
 # ---------------------------------------------------------------- PowerShell
@@ -101,44 +125,36 @@ $files = Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue 
 Write-Host "found $($files.Count) files under $root"
 '''
     body = {
-        "read": '''
+        "A": '''
 foreach ($f in $files) {
     try { [System.IO.File]::ReadAllBytes($f.FullName) | Out-Null } catch { }
 }
 Write-Host "read complete"
 ''',
-        "copy": '''
+        "C": '''
 foreach ($f in $files) {
-    try { Copy-Item $f.FullName "$($f.FullName).bak" -ErrorAction Stop } catch { }
+    try { Copy-Item $f.FullName "$($f.FullName).matrix" -ErrorAction Stop } catch { }
 }
 Write-Host "copies written"
 ''',
-        "copydel": '''
+        "D": '''
 foreach ($f in $files) {
     try {
-        Copy-Item $f.FullName "$($f.FullName).archived" -ErrorAction Stop
+        Copy-Item $f.FullName "$($f.FullName).matrix" -ErrorAction Stop
         Remove-Item $f.FullName -Force -ErrorAction Stop
     } catch { }
 }
 Write-Host "archived and removed"
 ''',
-        "rename": '''
+        "K": '''
+# Read, then remove, writing no replacement. The pair to D.
 foreach ($f in $files) {
-    try { Rename-Item $f.FullName "$($f.Name).processed" -ErrorAction Stop } catch { }
-}
-Write-Host "renamed"
-''',
-        "scratch": '''
-# Stage each file's contents to a temporary copy and clean up, the way a
-# converter or a build step does.
-foreach ($f in $files) {
-    $tmp = "$($f.FullName).tmp"
     try {
-        Copy-Item $f.FullName $tmp -ErrorAction Stop
-        Remove-Item $tmp -Force -ErrorAction Stop
+        [System.IO.File]::ReadAllBytes($f.FullName) | Out-Null
+        Remove-Item $f.FullName -Force -ErrorAction Stop
     } catch { }
 }
-Write-Host "scratch files cleaned up"
+Write-Host "read and removed"
 ''',
     }[method]
     return head + body
@@ -150,24 +166,23 @@ def vbs(method, scope, limit):
     root = SCOPES[scope][1]
     cap = f"    If n >= {limit} Then Exit Sub" if limit else ""
     action = {
-        "read": '''      Set st = fso.OpenTextFile(f.Path, 1, False)
-      On Error Resume Next
+        "A": '''      On Error Resume Next
+      Set st = fso.OpenTextFile(f.Path, 1, False)
       junk = st.ReadAll
       st.Close
       On Error GoTo 0''',
-        "copy": '''      On Error Resume Next
-      fso.CopyFile f.Path, f.Path & ".bak"
+        "C": '''      On Error Resume Next
+      fso.CopyFile f.Path, f.Path & ".matrix"
       On Error GoTo 0''',
-        "copydel": '''      On Error Resume Next
-      fso.CopyFile f.Path, f.Path & ".archived"
+        "D": '''      On Error Resume Next
+      fso.CopyFile f.Path, f.Path & ".matrix"
       fso.DeleteFile f.Path, True
       On Error GoTo 0''',
-        "rename": '''      On Error Resume Next
-      f.Name = f.Name & ".processed"
-      On Error GoTo 0''',
-        "scratch": '''      On Error Resume Next
-      fso.CopyFile f.Path, f.Path & ".tmp"
-      fso.DeleteFile f.Path & ".tmp", True
+        "K": '''      On Error Resume Next
+      Set st = fso.OpenTextFile(f.Path, 1, False)
+      junk = st.ReadAll
+      st.Close
+      fso.DeleteFile f.Path, True
       On Error GoTo 0''',
     }[method]
     return rf''' ' Routine file maintenance.
@@ -206,11 +221,10 @@ WScript.Echo "processed " & n & " files"
 def bat(method, scope, limit):
     root = SCOPES[scope][1]
     action = {
-        "read": 'type "%%f" > nul 2>&1',
-        "copy": 'copy /y "%%f" "%%f.bak" > nul 2>&1',
-        "copydel": 'copy /y "%%f" "%%f.archived" > nul 2>&1 && del /f /q "%%f" > nul 2>&1',
-        "rename": 'ren "%%f" "%%~nxf.processed" > nul 2>&1',
-        "scratch": 'copy /y "%%f" "%%f.tmp" > nul 2>&1 && del /f /q "%%f.tmp" > nul 2>&1',
+        "A": 'type "%%f" > nul 2>&1',
+        "C": 'copy /y "%%f" "%%f.matrix" > nul 2>&1',
+        "D": 'copy /y "%%f" "%%f.matrix" > nul 2>&1 && del /f /q "%%f" > nul 2>&1',
+        "K": 'type "%%f" > nul 2>&1 && del /f /q "%%f" > nul 2>&1',
     }[method]
     # A goto out of a parenthesised for body does not reliably stop the
     # loop in cmd, so the limit is enforced by guarding the work instead:
@@ -236,14 +250,13 @@ echo processed !n! files
 def js(method, scope, limit):
     root = SCOPES[scope][1]
     action = {
-        "read": '''      try { var st = fso.OpenTextFile(f.Path, 1, false); st.ReadAll(); st.Close(); }
+        "A": '''      try { var st = fso.OpenTextFile(f.Path, 1, false); st.ReadAll(); st.Close(); }
       catch (e) { }''',
-        "copy": '''      try { fso.CopyFile(f.Path, f.Path + ".bak"); } catch (e) { }''',
-        "copydel": '''      try { fso.CopyFile(f.Path, f.Path + ".archived");
+        "C": '''      try { fso.CopyFile(f.Path, f.Path + ".matrix"); } catch (e) { }''',
+        "D": '''      try { fso.CopyFile(f.Path, f.Path + ".matrix");
                    fso.DeleteFile(f.Path, true); } catch (e) { }''',
-        "rename": '''      try { f.Name = f.Name + ".processed"; } catch (e) { }''',
-        "scratch": '''      try { fso.CopyFile(f.Path, f.Path + ".tmp");
-                   fso.DeleteFile(f.Path + ".tmp", true); } catch (e) { }''',
+        "K": '''      try { var st = fso.OpenTextFile(f.Path, 1, false); st.ReadAll(); st.Close();
+                   fso.DeleteFile(f.Path, true); } catch (e) { }''',
     }[method]
     cap = f"      if (n >= {limit}) return;" if limit else ""
     return f'''// Routine file maintenance.
@@ -390,22 +403,22 @@ APP_TASKS = {
             pass"""), imports="import os, shutil")),
     "chrome_local": (
         "Chrome headless renders local files",
-        lambda root: _try_paths(CHROME,
+        lambda root, n=None: _try_paths(CHROME,
             f'--headless --disable-gpu --no-sandbox --dump-dom "file:///{root}"',
             "chrome headless")),
     "acrobat_open": (
         "Acrobat opens PDFs found here, then is closed",
-        lambda root: 'echo opening pdfs\nset N=0\n'
+        lambda root, n=6: 'echo opening pdfs\nset N=0\n'
                      f'for /r "{root}" %%f in (*.pdf) do (\n'
-                     '  if !N! lss 6 (start "" "%%f"& set /a N+=1& timeout /t 6 > nul)\n'
+                     f'  if !N! lss {n} (start "" "%%f"& set /a N+=1& timeout /t 6 > nul)\n'
                      ')\ntimeout /t 20 > nul\n'
                      'taskkill /f /im Acrobat.exe /im AcroRd32.exe /im AcroCEF.exe > nul 2>&1\n'
                      'echo closed'),
     "office_open": (
         "Word and Excel open documents found here, then are closed",
-        lambda root: 'echo opening office documents\nset N=0\n'
+        lambda root, n=8: 'echo opening office documents\nset N=0\n'
                      f'for /r "{root}" %%f in (*.docx *.xlsx) do (\n'
-                     '  if !N! lss 8 (start "" "%%f"& set /a N+=1& timeout /t 5 > nul)\n'
+                     f'  if !N! lss {n} (start "" "%%f"& set /a N+=1& timeout /t 5 > nul)\n'
                      ')\ntimeout /t 25 > nul\n'
                      'taskkill /f /im WINWORD.EXE /im EXCEL.EXE > nul 2>&1\necho closed'),
 }
@@ -464,8 +477,9 @@ def _python_task(code, imports="import os"):
     return "\n".join(lines)
 
 
-def app_bat(task, root):
-    body = APP_TASKS[task][1](root)
+def app_bat(task, root, count=None):
+    fn = APP_TASKS[task][1]
+    body = fn(root) if count is None else fn(root, count)
     return ("@echo off\r\n"
             "rem Ordinary use of software installed on this machine.\r\n"
             "setlocal enabledelayedexpansion\r\n"
@@ -503,21 +517,47 @@ def main():
     # only eight and each is a distinct program doing a distinct thing, so
     # sampling them would leave gaps that matter.
     if not args.no_apps:
-        # Chrome and the document viewers are given the two scopes that hold
-        # the files they open; the rest get all four.
-        limited = {"chrome_local", "acrobat_open", "office_open"}
+        # Two groups with different purposes, sized differently.
+        #
+        # 7-Zip and Python do the same shapes the compiled grid does, so they
+        # belong to the language comparison and are matched to it: shapes at
+        # two volumes, on the same profile-wide target. 7-Zip cannot do every
+        # shape -- it is an archiver, so it has no in-place write -- and the
+        # shapes it can do are the ones it is given.
+        #
+        # Chrome, Acrobat and Office are not part of that comparison at all.
+        # They are there because a person opening a folder of documents is a
+        # thing that happens, and the resulting file activity has no
+        # counterpart anywhere else in the set. Two scopes each is enough;
+        # spreading them wider would be repetition.
+        user_activity = {"chrome_local", "acrobat_open", "office_open"}
+        grid_matched = {"7z_encrypt_delete", "7z_encrypt_keep", "7z_perfile",
+                        "python_copy_delete", "python_read_only",
+                        "python_scratch"}
         for task, (desc, _fn) in APP_TASKS.items():
-            scopes = (["desktop", "documents"] if task in limited
-                      else list(APP_SCOPES))
+            if task in user_activity:
+                scopes = ["desktop", "documents"]
+            elif task in grid_matched:
+                scopes = ["documents", "profile"]
+            else:
+                scopes = ["profile"]
+            # The document viewers also vary in how many files they are
+            # given, since opening three and opening twenty are different
+            # amounts of work by the same signed program -- which is the
+            # volume axis, expressed the way a person would produce it.
+            counts = [3, 12] if task in user_activity else [None]
             for sc in scopes:
-                name = f"s_app_{task}_{sc}.bat"
-                path = os.path.join(outdir, name)
-                with open(path, "w", newline="") as f:
-                    f.write(app_bat(task, APP_SCOPES[sc]))
-                rows.append({"filename": name, "language": "app", "method": task,
-                              "scope": sc, "limit": 0,
-                              "description": f"{desc}, under {sc}",
-                              "bytes": os.path.getsize(path)})
+                for cnt in counts:
+                    tag = f"_{cnt}" if cnt else ""
+                    name = f"s_app_{task}_{sc}{tag}.bat"
+                    path = os.path.join(outdir, name)
+                    with open(path, "w", newline="") as f:
+                        f.write(app_bat(task, APP_SCOPES[sc], cnt))
+                    rows.append({"filename": name, "language": "app",
+                                  "method": task, "scope": sc,
+                                  "limit": cnt or 0,
+                                  "description": f"{desc}, under {sc}",
+                                  "bytes": os.path.getsize(path)})
 
     for lang, method, scope, limit in chosen:
         tag = f"{limit if limit else 'all'}"

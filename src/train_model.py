@@ -228,6 +228,14 @@ def main():
                               "its own fold")
     parser.add_argument("--min-calls", type=int, default=500)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--two-stage", action="store_true",
+                         help="Train and evaluate only on runs that opened at "
+                              "least --stage1-paths files, as a second stage "
+                              "behind a filter that keeps those")
+    parser.add_argument("--stage1-paths", type=float, default=50,
+                         help="Files a run must open to reach the second "
+                              "stage. Fifty is where the false positive rate "
+                              "on the hard negatives crosses one half.")
     parser.add_argument("--jobs", type=int, default=4,
                          help="How many leave-one-out retrainings to run at "
                               "once. Each is independent; the default suits a "
@@ -313,11 +321,58 @@ def main():
 
     rng = np.random.default_rng(args.seed)
     benign_idx = [i for i in range(len(rows)) if source[i] == "benign"]
-    hard_idx = [i for i in range(len(rows)) if source[i] == "hardneg"]
+    # A hard negative marked "train" by build_dataset joins the negatives the
+    # model learns from; everything else stays out and is only measured. The
+    # false positive rate is always reported on the held-out ones, so it
+    # remains a rate on software the model has not seen however the split
+    # falls.
+    hard_all = [i for i in range(len(rows)) if source[i] == "hardneg"]
+    hard_train = [i for i in hard_all if rows[i].get("split") == "train"]
+    hard_idx = [i for i in hard_all if i not in set(hard_train)]
     benign_fold = {i: int(k) for i, k in
                    zip(benign_idx, rng.integers(0, len(fold_families), len(benign_idx)))}
-    print(f"negatives: benign {len(benign_idx)} split across folds, "
-          f"hard negatives {len(hard_idx)} held out of training entirely")
+    if hard_train:
+        print(f"negatives: benign {len(benign_idx)} split across folds, "
+              f"{len(hard_train)} hard negatives in training, "
+              f"{len(hard_idx)} held out and measured")
+    else:
+        print(f"negatives: benign {len(benign_idx)} split across folds, "
+              f"hard negatives {len(hard_idx)} held out of training entirely")
+
+    # Two stages.
+    #
+    # The whole difficulty is that the file count separates the classes on
+    # its own, so the model never has to look at anything else. A first stage
+    # that keeps everything above a threshold and a second trained only on
+    # what it kept removes that: inside the second stage the file count is
+    # roughly constant, and a model that wants to do better than chance has
+    # to use something else.
+    #
+    # It also narrows the claim, and the narrowing should be stated rather
+    # than hidden. The system no longer says "this is ransomware"; it says
+    # "among programs that opened a folder's worth of files, this is
+    # ransomware". That is what a detector deployed on a real machine is
+    # doing anyway, since watching processes that touch nothing costs more
+    # than it returns.
+    if args.two_stage:
+        def paths_of(i):
+            v = to_float(rows[i].get("n_paths"))
+            return 0.0 if math.isnan(v) else v
+        keep = [i for i in range(len(rows)) if paths_of(i) >= args.stage1_paths]
+        dropped_pos = sum(1 for i in range(len(rows))
+                          if y[i] == 1 and i not in set(keep))
+        print(f"\ntwo-stage: the second stage sees only the "
+              f"{len(keep)} runs that opened {args.stage1_paths:.0f} files "
+              f"or more")
+        print(f"  positives the first stage would lose: {dropped_pos} "
+              f"of {int((y == 1).sum())}")
+        keep_set = set(keep)
+        benign_idx = [i for i in benign_idx if i in keep_set]
+        hard_idx = [i for i in hard_idx if i in keep_set]
+        hard_train = [i for i in hard_train if i in keep_set]
+        stage2_only = keep_set
+    else:
+        stage2_only = None
 
     # Build the matrix once and take column slices out of it.
     #
@@ -338,11 +393,13 @@ def main():
         hard_scores = []
 
         for k, fam in enumerate(fold_families):
-            test_pos = [i for i in range(len(rows))
+            test_pos = [i for i in (stage2_only if stage2_only is not None
+                                     else range(len(rows)))
                         if y[i] == 1 and family[i] == fam]
             test_neg = [i for i in benign_idx if benign_fold[i] == k]
             test = test_pos + test_neg
-            train = [i for i in range(len(rows))
+            pool = stage2_only if stage2_only is not None else range(len(rows))
+            train = [i for i in pool
                      if i not in set(test) and i not in set(hard_idx)
                      and not (y[i] == 1 and family[i] == fam)]
             if not test_pos or len(test_neg) < 5:
@@ -423,11 +480,13 @@ def main():
         prng = np.random.default_rng(args.seed + 1)
 
         for k, fam in enumerate(fold_families):
-            test_pos = [i for i in range(len(rows))
+            test_pos = [i for i in (stage2_only if stage2_only is not None
+                                     else range(len(rows)))
                         if y[i] == 1 and family[i] == fam]
             test_neg = [i for i in benign_idx if benign_fold[i] == k]
             test = test_pos + test_neg
-            train = [i for i in range(len(rows))
+            pool = stage2_only if stage2_only is not None else range(len(rows))
+            train = [i for i in pool
                      if i not in set(test) and i not in set(hard_idx)
                      and not (y[i] == 1 and family[i] == fam)]
             if not test_pos or len(test_neg) < 5:

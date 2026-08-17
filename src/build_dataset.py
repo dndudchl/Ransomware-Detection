@@ -114,6 +114,13 @@ def main():
     parser.add_argument("--features-dir", default="../data/features")
     parser.add_argument("--relational", required=True)
     parser.add_argument("--out", default="../data/features/modelling.csv")
+    parser.add_argument("--hardneg-manifest", nargs="*", default=[],
+                         help="Manifests carrying a category column, used to "
+                              "decide which hard negatives may be trained on")
+    parser.add_argument("--hardneg-train-frac", type=float, default=0.0,
+                         help="Fraction of the harmless hard negatives to put "
+                              "into training. The rest, and everything that "
+                              "destroyed anything, stay held out.")
     parser.add_argument("--keep-nonencrypting", action="store_true",
                          help="Keep ransomware runs that executed without "
                               "encrypting, as positives. Off by default; see "
@@ -196,6 +203,82 @@ def main():
     print(f"removed {removed} duplicate analyses of the same binary "
           f"({disagreed} of the duplicated binaries disagreed on the verdict)")
 
+    # --- which hard negatives may be trained on ---
+    #
+    # Holding all of them out is what lets the false positive rate on them be
+    # quoted, and with sixty-eight it was the only option. At several hundred
+    # a split becomes possible and answers a question the held-out
+    # arrangement cannot: does showing the model active benign software fix
+    # the false positive rate, or is the problem deeper than the training
+    # data?
+    #
+    # Only the harmless ones are eligible. A variant that read a folder,
+    # wrote replacements and deleted the originals cannot be labelled benign
+    # for training without contradicting the positives, which do exactly
+    # that. Those stay in the measurement set whatever the fraction.
+    #
+    # The split is by variant kind rather than at random. Splitting randomly
+    # would put shape C at fifty files in training and shape C at two hundred
+    # in the holdout, which are the same program at two sizes -- the model
+    # would be tested on what it had already seen. Splitting on the kind asks
+    # whether training on some kinds of active software generalises to
+    # others, which is the question worth asking.
+    category = {}
+    for path in args.hardneg_manifest:
+        for r in read_csv(os.path.expanduser(path)):
+            name = os.path.splitext(r.get("filename", ""))[0]
+            if name and r.get("category"):
+                category[name] = r["category"]
+    if args.hardneg_manifest:
+        print(f"hard negative categories: {len(category)} described")
+
+    def kind_of(sample_id):
+        """A key that groups a variant with its own size and repeat siblings."""
+        core = sample_id.lstrip("H").lstrip("N")
+        parts = [p for p in core.split("_") if p]
+        # xc_D_l200_rand_r3 -> xc_D_rand ; drop the volume and the repeat
+        keep = [p for p in parts if not p.startswith(("l", "r"))
+                or not p[1:].isdigit()]
+        return "_".join(keep[:3]) if keep else core
+
+    n_train = 0
+    if args.hardneg_train_frac > 0:
+        harmless = []
+        for r in deduped:
+            if r["source"] != "hardneg":
+                continue
+            name = r["sample_id"].lstrip("H").lstrip("N")
+            cat = category.get(name, "")
+            if not cat:
+                # No manifest entry: fall back to whether the run destroyed
+                # anything the sandbox recorded. Conservative -- anything
+                # uncertain stays out of training.
+                try:
+                    destroyed = int(float(r.get("n_delete") or 0)) > 0
+                except ValueError:
+                    destroyed = True
+                cat = "destroys" if destroyed else "harmless"
+            r["_category"] = cat
+            if cat == "harmless":
+                harmless.append(r)
+
+        kinds = sorted({kind_of(r["sample_id"]) for r in harmless})
+        cut = int(len(kinds) * args.hardneg_train_frac)
+        train_kinds = set(kinds[:cut])
+        for r in deduped:
+            if r.get("_category") == "harmless" and kind_of(r["sample_id"]) in train_kinds:
+                r["split"] = "train"
+                n_train += 1
+            elif r["source"] == "hardneg":
+                r["split"] = "holdout"
+            else:
+                r["split"] = ""
+        print(f"hard negatives: {n_train} of {len(harmless)} harmless variants "
+              f"put into training, from {len(train_kinds)} of {len(kinds)} kinds")
+    else:
+        for r in deduped:
+            r["split"] = "holdout" if r["source"] == "hardneg" else ""
+
     # --- family ---
     for r in deduped:
         r["family_group"] = canon_family(r.get("family", ""))
@@ -214,7 +297,7 @@ def main():
         print(f"   {k[0]:<12} y={k[1]}  {counts[k]:>5}")
 
     lead = ["sample_id", "sha256", "y", "source", "family_group", "coverage",
-            "verdict", "label"]
+            "verdict", "label", "split"]
     # Union across rows rather than the first row alone: the three sources
     # were extracted separately and a column present in one may be absent
     # from another, and the relational columns were attached afterwards.

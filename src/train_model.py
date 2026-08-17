@@ -228,6 +228,10 @@ def main():
                               "its own fold")
     parser.add_argument("--min-calls", type=int, default=500)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--jobs", type=int, default=4,
+                         help="How many leave-one-out retrainings to run at "
+                              "once. Each is independent; the default suits a "
+                              "machine with eight cores.")
     parser.add_argument("--executed-only", action="store_true",
                          help="Drop rows the sandbox never saw run. Four fifths "
                               "of the benign set is inert, and a model given it "
@@ -315,8 +319,20 @@ def main():
     print(f"negatives: benign {len(benign_idx)} split across folds, "
           f"hard negatives {len(hard_idx)} held out of training entirely")
 
-    def evaluate(feature_cols, tag):
-        X = np.array([[to_float(r.get(c)) for c in feature_cols] for r in rows])
+    # Build the matrix once and take column slices out of it.
+    #
+    # Rebuilding it inside evaluate() meant converting every cell again on
+    # every call: 3,661 rows by 99 columns is 360,000 conversions, and the
+    # leave-one-out pass calls evaluate a hundred times. That is 36 million
+    # conversions in Python, which is both the bulk of the runtime and the
+    # reason threading the loop changed nothing -- the work was holding the
+    # interpreter lock, not sitting inside XGBoost.
+    matrix_cols = [c for g in GROUPS for c in present[g]]
+    col_index = {c: i for i, c in enumerate(matrix_cols)}
+    FULL = np.array([[to_float(r.get(c)) for c in matrix_cols] for r in rows])
+
+    def evaluate(feature_cols, tag, threads=4):
+        X = FULL[:, [col_index[c] for c in feature_cols]]
         per_fold = []
         hard_flagged = np.zeros(len(hard_idx))
         hard_scores = []
@@ -335,7 +351,7 @@ def main():
             model = XGBClassifier(
                 n_estimators=300, max_depth=5, learning_rate=0.08,
                 subsample=0.9, colsample_bytree=0.9,
-                eval_metric="logloss", n_jobs=4,
+                eval_metric="logloss", n_jobs=threads,
                 random_state=args.seed,
                 scale_pos_weight=max(1.0, (y[train] == 0).sum() / max(1, (y[train] == 1).sum())),
             )
@@ -540,13 +556,37 @@ def main():
 
     if args.leave_one_out:
         all_cols = [c for g in GROUPS for c in present[g]]
-        print(f"\nretraining without each of {len(all_cols)} features in turn")
+        print(f"\nretraining without each of {len(all_cols)} features in turn"
+              f" ({args.jobs} at a time)")
         base = evaluate(all_cols, "all")
+
+        # Each removal is independent of every other, so they run together.
+        # Threads rather than processes: the work is inside XGBoost, which
+        # releases the interpreter lock, and the training matrix would have
+        # to be copied to every process otherwise.
+        #
+        # XGBoost is given one thread each when they run in parallel. Left at
+        # four, ninety-nine jobs would ask for four hundred threads on eight
+        # cores and spend the time switching between them.
         loo = []
-        for n, c in enumerate(all_cols, 1):
-            r = evaluate([x for x in all_cols if x != c], f"-{c}")
-            loo.append((c, base["auc"] - r["auc"], r["fpr_hard"] - base["fpr_hard"]))
-            print(f"\r   {n}/{len(all_cols)}", end="", flush=True)
+        done = [0]
+        from concurrent.futures import ThreadPoolExecutor
+        import threading
+        lock = threading.Lock()
+
+        def one(c):
+            r = evaluate([x for x in all_cols if x != c], f"-{c}",
+                         threads=1 if args.jobs > 1 else 4)
+            with lock:
+                done[0] += 1
+                print(f"\r   {done[0]}/{len(all_cols)}", end="", flush=True)
+            return (c, base["auc"] - r["auc"], r["fpr_hard"] - base["fpr_hard"])
+
+        if args.jobs > 1:
+            with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+                loo = list(pool.map(one, all_cols))
+        else:
+            loo = [one(c) for c in all_cols]
         print()
         print(f"\n{'feature':<28}{'AUC lost':>10}{'FP hard gained':>16}")
         for c, da, dh in sorted(loo, key=lambda x: -x[1])[:20]:
@@ -596,9 +636,9 @@ def main():
             hits = sum(1 for p_ in sel if rate_by_pos[p_] >= 0.5)
             print(f"   {label:<14}{len(sel):>5}{hits:>9}"
                   f"{hits / len(sel):>8.3f}")
-            print("   The ransomware median is 578 distinct files. A backup")
-            print("   script, a bulk rename or an archiver reaches the band")
-            print("   where almost everything is flagged.")
+        print("   The ransomware median is 578 distinct files. A backup")
+        print("   script, a bulk rename or an archiver reaches the band")
+        print("   where almost everything is flagged.")
     print("\nThe benign column is the number that looks best and means least:")
     print("most of that set never executed. The hard negative column is the")
     print("one to quote: the model never saw those programs, and they open a")

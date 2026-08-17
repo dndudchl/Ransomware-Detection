@@ -331,6 +331,8 @@ def main():
     hard_idx = [i for i in hard_all if i not in set(hard_train)]
     benign_fold = {i: int(k) for i, k in
                    zip(benign_idx, rng.integers(0, len(fold_families), len(benign_idx)))}
+    hard_fold = {i: int(k) for i, k in
+                 zip(hard_all, rng.integers(0, len(fold_families), len(hard_all)))}
     if hard_train:
         print(f"negatives: benign {len(benign_idx)} split across folds, "
               f"{len(hard_train)} hard negatives in training, "
@@ -371,6 +373,38 @@ def main():
         hard_idx = [i for i in hard_idx if i in keep_set]
         hard_train = [i for i in hard_train if i in keep_set]
         stage2_only = keep_set
+
+        # Almost no benign program survives the filter, and that is the point
+        # rather than an inconvenience: of 1,563 programs in the benign set,
+        # six open fifty files. The corpus contains nothing that behaves like
+        # a backup script.
+        #
+        # So the second stage has no negatives unless some hard negatives are
+        # trained on. The two experiments turn out to be one: asking what the
+        # model learns when volume is held constant requires having active
+        # negatives to learn from, and only the hard negatives are active.
+        print(f"  benign programs that reach the second stage: "
+              f"{len(benign_idx)} of "
+              f"{sum(1 for i in range(len(rows)) if source[i] == 'benign')}")
+        if len(benign_idx) < 5 * len(fold_families) and not hard_train:
+            print()
+            print("  [!] Not enough negatives to evaluate. Every fold needs a")
+            print("      few negatives in its test set and the benign corpus")
+            print("      cannot supply them at this threshold.")
+            print()
+            print("      Rebuild with some of the harmless hard negatives in")
+            print("      training and the rest held back:")
+            print()
+            print("        python3 build_dataset.py --features-dir ~/work \\")
+            print("          --relational ~/work/rel_all.csv \\")
+            print("          --hardneg-manifest <manifest.csv> \\")
+            print("          --hardneg-train-frac 0.5 \\")
+            print("          --out ~/work/modelling_split.csv")
+            print()
+            print("      The held-out half then supplies the negatives, and")
+            print("      the false positive rate is still measured on")
+            print("      software the model has not seen.")
+            return
     else:
         stage2_only = None
 
@@ -397,6 +431,11 @@ def main():
                                      else range(len(rows)))
                         if y[i] == 1 and family[i] == fam]
             test_neg = [i for i in benign_idx if benign_fold[i] == k]
+            if stage2_only is not None:
+                # With the benign corpus gone from this stage, the held-out
+                # hard negatives are the negatives. They are split across the
+                # folds the same way, and none of them was trained on.
+                test_neg += [i for i in hard_idx if hard_fold.get(i) == k]
             test = test_pos + test_neg
             pool = stage2_only if stage2_only is not None else range(len(rows))
             train = [i for i in pool
@@ -484,6 +523,11 @@ def main():
                                      else range(len(rows)))
                         if y[i] == 1 and family[i] == fam]
             test_neg = [i for i in benign_idx if benign_fold[i] == k]
+            if stage2_only is not None:
+                # With the benign corpus gone from this stage, the held-out
+                # hard negatives are the negatives. They are split across the
+                # folds the same way, and none of them was trained on.
+                test_neg += [i for i in hard_idx if hard_fold.get(i) == k]
             test = test_pos + test_neg
             pool = stage2_only if stage2_only is not None else range(len(rows))
             train = [i for i in pool

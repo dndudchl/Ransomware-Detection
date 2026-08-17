@@ -150,7 +150,13 @@ def build_c(j, out, src):
     flags = [f"-DSHAPE={j['shape']}", f"-DLIMIT={j['limit']}",
              f"-DORDER={j['order']}", f"-DTIMING={j['timing']}",
              f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}"]
-    cmd = [CC, "-O2"] + flags + ["-o", out, src]
+    # The fake-import build references networking, shell and service APIs
+    # that live outside the default link set, so those libraries have to be
+    # named. They are only linked for that build: adding them everywhere
+    # would put the same imports in every variant and destroy the comparison
+    # the flag exists to make.
+    libs = ["-lwininet", "-lshell32", "-ladvapi32", "-lole32"] if j["fake"] else []
+    cmd = [CC, "-O2"] + flags + ["-o", out, src] + libs
     return subprocess.run(cmd, capture_output=True, text=True)
 
 

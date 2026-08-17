@@ -173,16 +173,23 @@ GROUPS = {
     ],
 }
 
+# The order matters and is not arbitrary. Each group is added after the ones
+# that could explain its effect away, so that whatever it adds is what it
+# adds on its own: volume after static, relation after volume and sequence,
+# and the ransomware-specific indicators last but one -- if they help only
+# once everything else is present, they are not carrying the result.
 CUMULATIVE = [
     ("static", ["static"]),
     ("+ volume", ["static", "volume"]),
     ("+ sequence", ["static", "volume", "sequence"]),
     ("+ relation", ["static", "volume", "sequence", "relation"]),
-    ("+ destruction", ["static", "volume", "sequence", "relation", "destruction"]),
+    ("+ indicator", ["static", "volume", "sequence", "relation", "indicator"]),
+    ("+ destruction", ["static", "volume", "sequence", "relation",
+                        "indicator", "destruction"]),
 ]
 
 # Also run each group on its own, which shows what it carries unaided.
-ALONE = ["static", "volume", "sequence", "relation", "destruction"]
+ALONE = ["static", "volume", "sequence", "relation", "indicator", "destruction"]
 
 
 def to_float(v):
@@ -560,6 +567,38 @@ def main():
 
     print(f"\n{full['hard_always']} of {len(hard_idx)} hard negatives were flagged "
           f"in every fold")
+
+    # The rate over the whole set is a property of how the set was assembled
+    # rather than of the detector. Half of these programs are Sysinternals
+    # tools run without arguments, which print their usage and exit: they
+    # touch nothing, so of course nothing flags them, and adding more of them
+    # would drive the figure to zero without changing what the model does.
+    #
+    # Split by how many distinct files each program opened, the number stops
+    # moving with the composition of the set and starts describing the
+    # detector. It also locates the boundary, which no single figure can.
+    if hard_idx:
+        rate_by_pos = [full["hard_flagged"][p_] / max(1, full["n_folds"])
+                       for p_ in range(len(hard_idx))]
+        bands = [(0, 10, "under 10"), (10, 50, "10 to 49"),
+                 (50, 200, "50 to 199"), (200, 10**9, "200 or more")]
+        print("\n  by how many distinct files the program opened:")
+        print(f"   {'':<14}{'n':>5}{'flagged':>9}{'rate':>8}")
+        for lo, hi, label in bands:
+            sel = []
+            for p_, i in enumerate(hard_idx):
+                v = to_float(rows[i].get("n_paths"))
+                v = 0.0 if math.isnan(v) else v
+                if lo <= v < hi:
+                    sel.append(p_)
+            if not sel:
+                continue
+            hits = sum(1 for p_ in sel if rate_by_pos[p_] >= 0.5)
+            print(f"   {label:<14}{len(sel):>5}{hits:>9}"
+                  f"{hits / len(sel):>8.3f}")
+            print("   The ransomware median is 578 distinct files. A backup")
+            print("   script, a bulk rename or an archiver reaches the band")
+            print("   where almost everything is flagged.")
     print("\nThe benign column is the number that looks best and means least:")
     print("most of that set never executed. The hard negative column is the")
     print("one to quote: the model never saw those programs, and they open a")

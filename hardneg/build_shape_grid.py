@@ -107,7 +107,8 @@ def plan_main():
         for t in TIMINGS:
             for rep in range(5):
                 jobs.append(dict(tool="c", shape=sh, limit=200, order=0,
-                                 timing=t, effects=0, fake=0, rep=rep))
+                                 timing=t, effects=0, fake=0, rep=rep,
+                                 group="timing"))
 
     # Import table: the same subset with a ransomware-shaped import list
     for sh in SUBSET:
@@ -136,7 +137,10 @@ def name_of(j):
     parts = [f"x{j['tool']}", letter, f"l{j['limit']}"]
     if j["order"]:
         parts.append("rand")
-    if j["timing"]:
+    # The timing group carries TIMING=0 as its own baseline, and without a
+    # marker those twenty take the same name as the main grid and overwrite
+    # it -- 920 rows in the manifest, 900 files on disk.
+    if j.get("group") == "timing":
         parts.append(f"t{j['timing']}")
     if j["effects"]:
         parts.append(f"e{j['effects']}")
@@ -149,7 +153,8 @@ def name_of(j):
 def build_c(j, out, src):
     flags = [f"-DSHAPE={j['shape']}", f"-DLIMIT={j['limit']}",
              f"-DORDER={j['order']}", f"-DTIMING={j['timing']}",
-             f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}"]
+             f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}",
+             f"-DBUILD_REP={j['rep']}"]
     # The fake-import build references networking, shell and service APIs
     # that live outside the default link set, so those libraries have to be
     # named. They are only linked for that build: adding them everywhere
@@ -167,7 +172,7 @@ def build_go(j, out, srcdir):
     ld = " ".join(f"-X main.{k}={v}" for k, v in
                   (("shape", j["shape"]), ("limit", j["limit"]),
                    ("order", j["order"]), ("timing", j["timing"]),
-                   ("effects", j["effects"])))
+                   ("effects", j["effects"]), ("rep", j["rep"])))
     env = dict(os.environ, GOOS="windows", GOARCH="amd64", CGO_ENABLED="0")
     return subprocess.run(["go", "build", "-ldflags", ld, "-o", out, "."],
                           cwd=srcdir, capture_output=True, text=True, env=env)
@@ -177,7 +182,7 @@ def build_rust(j, out, srcdir):
     env = dict(os.environ,
                HN_SHAPE=str(j["shape"]), HN_LIMIT=str(j["limit"]),
                HN_ORDER=str(j["order"]), HN_TIMING=str(j["timing"]),
-               HN_EFFECTS=str(j["effects"]))
+               HN_EFFECTS=str(j["effects"]), HN_REP=str(j["rep"]))
     r = subprocess.run(["cargo", "build", "--release",
                         "--target", "x86_64-pc-windows-gnu"],
                        cwd=srcdir, capture_output=True, text=True, env=env)

@@ -17,15 +17,19 @@ fn main() {
          const LIMIT: usize = {};\n\
          const ORDER: usize = {};\n\
          const TIMING: usize = {};\n\
-         const EFFECTS: usize = {};\n",
+         const EFFECTS: usize = {};\n\
+         #[allow(dead_code)]\n\
+         const BUILD_REP: usize = {};\n",
         get("HN_SHAPE", "1"),
         get("HN_LIMIT", "200"),
         get("HN_ORDER", "0"),
         get("HN_TIMING", "0"),
         get("HN_EFFECTS", "0"),
+        get("HN_REP", "0"),
     );
     fs::write(Path::new(&out).join("params.rs"), body).unwrap();
-    for k in ["HN_SHAPE", "HN_LIMIT", "HN_ORDER", "HN_TIMING", "HN_EFFECTS"] {
+    for k in ["HN_SHAPE", "HN_LIMIT", "HN_ORDER", "HN_TIMING", "HN_EFFECTS",
+              "HN_REP"] {
         println!("cargo:rerun-if-env-changed={}", k);
     }
 }

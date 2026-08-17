@@ -46,6 +46,9 @@ var (
 	order   = "0"
 	timing  = "0"
 	effects = "0"
+	// Repeats of the same parameters must differ as files, or the linker
+	// emits the identical binary and the pipeline keeps one of them.
+	rep = "0"
 )
 
 const (
@@ -197,8 +200,8 @@ func atoi(s string) int {
 func main() {
 	sh, lim, ord, tim, eff := atoi(shape), atoi(limit), atoi(order),
 		atoi(timing), atoi(effects)
-	fmt.Printf("matrix(go): shape=%d limit=%d order=%d timing=%d effects=%d\n",
-		sh, lim, ord, tim, eff)
+	fmt.Printf("matrix(go): shape=%d limit=%d order=%d timing=%d effects=%d rep=%s\n",
+		sh, lim, ord, tim, eff, rep)
 	time.Sleep(3 * time.Second)
 
 	files, dirs := collect(4000)

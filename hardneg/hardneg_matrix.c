@@ -74,6 +74,14 @@
 #ifndef EFFECTS
 #define EFFECTS 0 /* bitmask: 1 note, 2 wallpaper, 4 shadow, 8 recovery, 16 service */
 #endif
+#ifndef BUILD_REP
+/* Repeats of the same parameters have to differ as files, or the compiler
+ * emits the identical binary six times and the pipeline -- which drops
+ * duplicate hashes -- keeps one of them. The repeats are wanted: they
+ * measure how much the sandbox itself varies between runs of the same
+ * program, which is the floor under any difference the grid shows. */
+#define BUILD_REP 0
+#endif
 #ifndef FAKE_IMPORTS
 /* Reference the API categories ransomware imports, without calling them for
  * any purpose. Every hard negative so far is a small C binary with about
@@ -354,8 +362,8 @@ static void pause_between(int index, int total)
 
 int main(void)
 {
-    say("matrix: shape=%d limit=%d order=%d timing=%d effects=%d fake=%d",
-        SHAPE, LIMIT, ORDER, TIMING, EFFECTS, FAKE_IMPORTS);
+    say("matrix: shape=%d limit=%d order=%d timing=%d effects=%d fake=%d rep=%d",
+        SHAPE, LIMIT, ORDER, TIMING, EFFECTS, FAKE_IMPORTS, BUILD_REP);
 #if FAKE_IMPORTS
     reference_only();
 #endif

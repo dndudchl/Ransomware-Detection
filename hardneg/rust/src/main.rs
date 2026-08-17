@@ -305,8 +305,8 @@ fn do_effects(dirs: &[PathBuf]) {
 
 fn main() {
     println!(
-        "matrix(rust): shape={} limit={} order={} timing={} effects={}",
-        SHAPE, LIMIT, ORDER, TIMING, EFFECTS
+        "matrix(rust): shape={} limit={} order={} timing={} effects={} rep={}",
+        SHAPE, LIMIT, ORDER, TIMING, EFFECTS, BUILD_REP
     );
     sleep(Duration::from_secs(3));
 

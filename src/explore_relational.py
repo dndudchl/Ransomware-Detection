@@ -549,6 +549,146 @@ def set_relation_features(behavior):
     }
 
 
+def latency_features(behavior):
+    """
+    How long a file waits between being read and being written.
+
+    Every other temporal feature here measures the gaps between consecutive
+    events, whoever they belonged to. This one pairs the two events that
+    happened to the same file, which is a different thing: it asks how long
+    the program held the contents before putting them back.
+
+    A loop encrypting a folder reads and writes each file inside one
+    iteration, so the wait is milliseconds and the same for every file. A
+    person opens a document, works on it and saves -- minutes, and a
+    different number of minutes each time. An editor autosaving sits between
+    the two.
+
+    That distinction is invisible to everything else in this table. Shape B
+    in the variant grid reads a file and writes it straight back; a text
+    editor doing the same thing leaves an identical trail of paths, counts
+    and set overlaps. The interval is the only place they differ.
+    """
+    from datetime import datetime
+
+    first_read, waits = {}, []
+    for event in behavior.get("enhanced", []) or []:
+        if event.get("object") != "file":
+            continue
+        data = event.get("data", {}) or {}
+        path = data.get("file") or data.get("from")
+        stamp = event.get("timestamp")
+        if not path or not stamp:
+            continue
+        try:
+            t = datetime.strptime(stamp, "%Y-%m-%d %H:%M:%S,%f")
+        except (ValueError, TypeError):
+            continue
+        kind = event.get("event")
+        if kind == "read":
+            # The first read is the one that matters; a program re-reading a
+            # file it has already written is doing something else.
+            first_read.setdefault(path, t)
+        elif kind == "write" and path in first_read:
+            gap = (t - first_read.pop(path)).total_seconds()
+            if 0 <= gap < 600:
+                waits.append(gap)
+
+    if len(waits) < 5:
+        return {k: "" for k in ("rw_latency_median_ms", "rw_latency_cv",
+                                 "rw_latency_under_100ms", "n_read_write_pairs")}
+
+    waits.sort()
+    median = waits[len(waits) // 2]
+    mean = sum(waits) / len(waits)
+    sd = (sum((w - mean) ** 2 for w in waits) / len(waits)) ** 0.5
+
+    return {
+        "n_read_write_pairs": len(waits),
+        "rw_latency_median_ms": round(median * 1000, 2),
+        # Near zero when every file waits the same time, which is what a loop
+        # produces. Large when the waits are all different.
+        "rw_latency_cv": round(sd / mean, 4) if mean > 0 else "",
+        # The share handled inside a tenth of a second: read and written
+        # without anything happening in between.
+        "rw_latency_under_100ms": round(
+            sum(1 for w in waits if w < 0.1) / len(waits), 4),
+    }
+
+
+def byte_features(behavior):
+    """
+    How many bytes went in against how many came out.
+
+    Every set-based feature above counts files. Two programs can read the
+    same files and write the same number of files and still be doing
+    completely different things to the contents, and the only place that
+    shows is the volume of data.
+
+    Encryption preserves size: a ciphertext is as long as its plaintext, so
+    bytes out over bytes in sits at one. Compression does not: an archiver
+    reading a folder of documents writes a third of what it read, or less.
+    That distinction is the one thing separating 7-Zip with -mhe -sdel from
+    a family encrypting the same folder -- both read every file, write a
+    replacement and delete the original, and on every other feature in this
+    table they are the same program.
+
+    Read from the call log rather than the enhanced events, which record
+    which file was touched but not how much of it. The Length argument is
+    what the caller asked for rather than what was transferred, so these are
+    close rather than exact, and that is enough for a ratio.
+    """
+    read_bytes = write_bytes = 0
+    n_read = n_write = 0
+    write_sizes = Counter()
+    for process in behavior.get("processes", []) or []:
+        for call in process.get("calls", []) or []:
+            api = call.get("api")
+            if api not in ("NtReadFile", "NtWriteFile", "ReadFile", "WriteFile"):
+                continue
+            args = call.get("arguments")
+            if isinstance(args, list):
+                args = {a.get("name"): a.get("value")
+                        for a in args if isinstance(a, dict)}
+            if not isinstance(args, dict):
+                continue
+            raw = args.get("Length") or args.get("length") or args.get("Buffer_Length")
+            try:
+                n = int(str(raw), 0)
+            except (TypeError, ValueError):
+                continue
+            if n < 0 or n > 1 << 30:
+                continue
+            if api in ("NtReadFile", "ReadFile"):
+                read_bytes += n; n_read += 1
+            else:
+                write_bytes += n; n_write += 1
+                write_sizes[n] += 1
+
+    if n_read == 0 and n_write == 0:
+        return {k: "" for k in ("bytes_read", "bytes_written", "byte_io_ratio",
+                                 "mean_read_size", "mean_write_size",
+                                 "write_size_uniformity")}
+
+    return {
+        "bytes_read": read_bytes,
+        "bytes_written": write_bytes,
+        # One when the output is the size of the input, which is what
+        # encryption does. Well under one for compression, far above for a
+        # program that writes more than it reads.
+        "byte_io_ratio": (round(write_bytes / read_bytes, 4)
+                          if read_bytes else ""),
+        "mean_read_size": round(read_bytes / n_read, 1) if n_read else "",
+        "mean_write_size": round(write_bytes / n_write, 1) if n_write else "",
+        # A loop writing whole files produces one write size; software
+        # writing logs and config and output produces many. Expressed as the
+        # share of writes at the most common size, so it does not move with
+        # how many writes there were.
+        "write_size_uniformity": (round(write_sizes.most_common(1)[0][1] / n_write, 4)
+                                   if n_write else ""),
+    }
+
+
 def traversal_features(behavior):
     """
     Whether the file accesses walk a tree or pick things out of it.
@@ -676,6 +816,8 @@ def process_one(path):
     row.update(selectivity_features(behavior))
     row.update(set_relation_features(behavior))
     row.update(stage_features(report))
+    row.update(byte_features(behavior))
+    row.update(latency_features(behavior))
     row.update(traversal_features(behavior))
     row.update(rhythm_features(behavior))
     return row

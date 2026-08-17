@@ -27,18 +27,35 @@ The split is by family, not at random
 
 Three false positive rates are reported, not one
     On the whole benign set, on the benign runs that actually executed, and
-    on the hard negatives -- sixty-eight programs built to be as busy as
-    ransomware while doing something legitimate. The three differ by a lot,
-    and the third is the one worth quoting.
+    on the hard negatives -- programs that open a folder's worth of files
+    for a reason a person asked for. The three differ by a lot, and the
+    third is the one worth quoting.
+
+    Not because those programs are as busy as ransomware; they are not. By
+    call count they sit with the benign set, 1,305 against 1,182 at the
+    median, while the ransomware median is 70,788. What makes them the
+    useful comparison is that they touch 95 distinct files where the benign
+    runs touch 3, and that alone moves the classification from 0.6% to 72%.
 
 Feature groups
 --------------
 Cumulative, so each line shows what the group above it added:
 
     static      the import table, available without running anything
-    volume      how much happened: calls, paths, distinct APIs
-    sequence    the shape of the API stream, independent of files
-    relation    how reads relate to writes, without reference to destruction
+    volume      how much happened: calls, paths, bytes, distinct APIs
+    sequence    the shape of the API stream and the rhythm of the file
+                operations, independent of which files
+    relation    how reads relate to writes: which paths coincide, how many
+                bytes came back out, whether the walk swept a tree or
+                jumped about, and how long each file waited between being
+                read and written
+    indicator   counts of the particular things ransomware does -- deleting
+                shadow copies, disabling recovery, killing processes. Kept
+                out of the relational group because they are counts of
+                actions rather than relations between events, and mixing
+                them made the ablation unreadable: a drop in the false
+                positive rate could have come from either and the two
+                support different claims
     destruction features counting what was destroyed -- reported separately
                 because they overlap with the verdict's own inputs, even
                 though none of them restates one
@@ -83,6 +100,7 @@ GROUPS = {
     ],
     "volume": [
         "n_calls", "n_paths", "n_read", "n_write", "n_copy", "n_execute",
+        "bytes_read", "bytes_written",
         "n_file_writes", "n_registry_writes", "n_registry_deletes",
         "n_services_created", "n_services_started", "n_executed_commands",
         "active_windows", "other_windows", "write_only_nondestructive_windows",
@@ -95,17 +113,56 @@ GROUPS = {
         "api_compress_ratio", "cat_switch_rate",
         "fs_to_crypto", "crypto_to_fs", "fs_crypto_interleave",
         "n_crypto_calls", "crypto_buffer_entropy_mean",
+        # How evenly spaced the file operations are. A loop encrypting a
+        # thousand files keeps time, and the gaps between operations cluster
+        # around the cost of one iteration; software reacting to a person, or
+        # to what it finds, scatters across orders of magnitude. These are
+        # the only features here that describe the intervals rather than the
+        # order, and they cost nothing to compute from timestamps already in
+        # the report.
+        "gap_cv", "gap_median_ms", "gap_below_median", "burst_share",
     ],
     "relation": [
         "rw_jaccard", "write_not_read", "read_not_write", "rw_size_ratio",
+        # Bytes rather than files. Encryption returns a ciphertext the size
+        # of its plaintext; compression returns a third of it. Everything
+        # else in this table counts files, and on files an archiver deleting
+        # its inputs and a family encrypting them are the same program.
+        "byte_io_ratio", "mean_read_size", "mean_write_size",
+        "write_size_uniformity",
         "chain_read_only", "chain_write_only", "chain_read_write",
         "chain_top_shape_share", "ext_top_share",
         "sel_rate_document", "sel_rate_media", "sel_rate_executable",
         "sel_rate_spread", "sel_system_touch_share", "sel_system_spared",
-        "stage_ground_clearing", "stage_has_enumerate", "stage_has_wallpaper",
-        "stage_has_persistence",
+
+        # Whether the file accesses walk a tree or pick things out of it.
+        # Two runs touching the same files the same number of times differ
+        # here if one swept and the other jumped about, so these are the
+        # features the sweep/shuffled pair of variants exists to test -- and
+        # the only ones in the set that can separate that pair, since every
+        # count is identical across it.
+        "walk_same_dir_rate", "walk_dir_switches", "walk_revisit_rate",
+        "walk_run_length", "walk_distinct_dirs",
+        # How long a file waits between being read and written. Every other
+        # timing feature measures gaps between consecutive events whoever
+        # they belonged to; this pairs the two events on the same file, which
+        # is what separates a loop from a person editing a document.
+        "rw_latency_median_ms", "rw_latency_cv", "rw_latency_under_100ms",
+        "n_read_write_pairs",
+    ],
+    # Actions specific to ransomware, kept apart from the relational group.
+    #
+    # These were in "relation" because they are ransomware-shaped, but they
+    # are counts of particular commands rather than relations between events,
+    # and mixing them made the ablation unreadable: a four-point drop in the
+    # false positive rate when the relational group is added could have come
+    # from rw_jaccard or from n_shadow_delete, and those support completely
+    # different claims. Separated, each group answers for itself.
+    "indicator": [
         "n_shadow_delete", "n_recovery_disable", "n_service_stop",
         "n_process_kill", "n_log_clear", "n_prep_categories",
+        "stage_ground_clearing", "stage_has_enumerate", "stage_has_wallpaper",
+        "stage_has_persistence",
     ],
     "destruction": [
         "chain_read_destroy", "chain_write_destroy", "chain_full",
@@ -505,8 +562,12 @@ def main():
           f"in every fold")
     print("\nThe benign column is the number that looks best and means least:")
     print("most of that set never executed. The hard negative column is the")
-    print("one to quote -- those programs were as busy as the ransomware and")
-    print("the model never saw them during training.")
+    print("one to quote: the model never saw those programs, and they open a")
+    print("folder's worth of files the way legitimate software does. They are")
+    print("not as active as the ransomware -- by call count they sit with the")
+    print("benign set -- which makes the gap between the two benign columns")
+    print("the thing to explain, since it is not explained by how much each")
+    print("of them did.")
 
 
 if __name__ == "__main__":

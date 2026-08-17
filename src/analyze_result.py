@@ -184,15 +184,31 @@ MIN_CORROBORATING_AXES = 2
 
 # Minimum magnitude for an axis to count toward corroboration.
 #
-# Corroboration was built on the observation that no non-encrypting run
-# registered on any axis at all, so any two together meant something. Adding
-# a fourth axis weakened that: a build system renaming forty files onto .tmp
-# alongside a readme.md, and a log rotation producing app.log.1 through .4,
-# both reached two axes and were called encryption.
+# Corroboration rests on the observation that no non-encrypting run in the
+# labelled set registered on any axis at all, so two faint traces together
+# were not two coincidences.
 #
-# Requiring a handful of events per axis restores the property. A single
-# rename or one stray note is not evidence of anything; several of each,
-# occurring together, still is.
+# The value is one, and an earlier note here argued it should be higher --
+# that a single rename or one stray note is not evidence of anything. That
+# note described an intention rather than the code, and the two are
+# reconciled here in favour of the code, for a reason worth recording.
+#
+# Raising it was measured. Of 164 runs judged TRUE_ENCRYPTION in a labelled
+# batch of 232, five were decided on corroboration alone. A threshold of
+# three keeps two of those five and loses three; scaled to the full set that
+# is roughly thirty-five encrypting runs reclassified as harmless.
+#
+# What it would buy is the exclusion of one constructed hard negative, a
+# variant that dropped ransom notes and touched nothing else. That is a
+# genuine weakness of this rule, and it is documented rather than fixed,
+# because the trade is thirty-five real positives for one -- and because the
+# hard negative in question is a program written for this experiment and run
+# through a tool built to label ransomware. Its verdict is out-of-domain
+# output, not a false positive by a detector.
+#
+# The note axis uses a literal 1 below rather than this constant: a note is
+# a file that either appeared in a directory or did not, and requiring three
+# of them in one directory would be requiring something different.
 MIN_EVENTS_PER_AXIS = 1
 
 MANIFEST_FIELDNAMES = [

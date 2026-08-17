@@ -854,9 +854,28 @@ def get_cape_metadata(report):
     }
 
 
-# API calls below which a sample is taken not to have executed. Matches the
-# gate in analyze_result, so the two agree on what "it ran" means.
-MIN_TOTAL_CALLS_FOR_DYNAMIC = 500
+# API calls below which a sample is taken not to have executed.
+#
+# This used to match the 500 in analyze_result, on the reasoning that the two
+# should agree on what "it ran" means. They should not, because they are
+# deciding different things. analyze_result asks whether there was enough
+# activity to judge a verdict from; this asks whether the dynamic features
+# are observations or absences, and a program that made two hundred calls has
+# been observed.
+#
+# Matching them cost something measurable. Three of the sixty-eight hard
+# negatives fell below 500 and were written out as static-only, which left
+# their behavioural features empty. A row of empty features is
+# indistinguishable from a program that never ran, the model does not flag
+# it, and it counts as a correct negative -- so the false positive rate on
+# that set was reported lower than it was, in the direction that flatters
+# the detector.
+#
+# A hundred is where a process has started and done something. Below that
+# there is genuinely nothing to measure. The relational extraction already
+# works this way, deciding per feature whether it has enough events rather
+# than discarding the whole run, and this brings the two into line.
+MIN_TOTAL_CALLS_FOR_DYNAMIC = 100
 
 
 def report_shows_execution(report):

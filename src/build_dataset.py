@@ -19,11 +19,25 @@ positives
     anything about detecting a sample before it triggers.
 
 hard negatives held out
-    Sixty-eight programs, each built to be as busy as ransomware while doing
-    something a person asked for. Sixty-eight is far too few to train on --
-    the model would memorise them -- but as a held-out set they answer the
-    question the benign set cannot: what is the false positive rate on
-    software that is active rather than inert.
+    Programs that touch a folder's worth of files for a reason a person
+    asked for. They are held out of training entirely and used only to
+    measure, which is what lets the false positive rate on them be quoted:
+    the model never saw them.
+
+    They are not as busy as ransomware, and the earlier claim in this file
+    that they were is withdrawn. Measured afterwards, the median hard
+    negative makes 1,305 API calls against the ransomware's 70,788 -- by
+    call count they sit with the benign programs. What separates them from
+    the benign set is the number of distinct files touched, 95 against 3,
+    and that turns out to be the whole story: two groups with almost the
+    same call count are classified at 0.6% and 72%.
+
+    Holding all of them out was the right call at sixty-eight. It is worth
+    revisiting now the set runs to several hundred, since half of them could
+    train and half could measure, which would answer whether training on
+    active benign software fixes the false positive rate or whether the
+    problem is deeper than the training data. That experiment is not in this
+    file yet.
 
 duplicates
     The same binary was analysed more than once, from retries and from both

@@ -74,14 +74,6 @@
 #ifndef EFFECTS
 #define EFFECTS 0 /* bitmask: 1 note, 2 wallpaper, 4 shadow, 8 recovery, 16 service */
 #endif
-#ifndef BUILD_REP
-/* Repeats of the same parameters have to differ as files, or the compiler
- * emits the identical binary six times and the pipeline -- which drops
- * duplicate hashes -- keeps one of them. The repeats are wanted: they
- * measure how much the sandbox itself varies between runs of the same
- * program, which is the floor under any difference the grid shows. */
-#define BUILD_REP 0
-#endif
 #ifndef FAKE_IMPORTS
 /* Reference the API categories ransomware imports, without calling them for
  * any purpose. Every hard negative so far is a small C binary with about
@@ -362,8 +354,8 @@ static void pause_between(int index, int total)
 
 int main(void)
 {
-    say("matrix: shape=%d limit=%d order=%d timing=%d effects=%d fake=%d rep=%d",
-        SHAPE, LIMIT, ORDER, TIMING, EFFECTS, FAKE_IMPORTS, BUILD_REP);
+    say("matrix: shape=%d limit=%d order=%d timing=%d effects=%d fake=%d",
+        SHAPE, LIMIT, ORDER, TIMING, EFFECTS, FAKE_IMPORTS);
 #if FAKE_IMPORTS
     reference_only();
 #endif
@@ -377,6 +369,24 @@ int main(void)
     }
     say("found %d files across %d directories", g_count, g_dir_count);
 
+    /* Cut to the limit before shuffling, not after.
+     *
+     * The first version shuffled the whole list and then took the first N,
+     * which meant the two orders processed different files: the sweep took
+     * the first N the filesystem returned, and the shuffle took N drawn from
+     * everywhere. Those files differ in size and type, so the run lengths
+     * differed too -- 4,036 API calls against 3,321 at the median, an 18%
+     * gap. The pair was supposed to differ in nothing but order and differed
+     * in the work as well, so a difference in the outcome could not be
+     * attributed.
+     *
+     * Cutting first fixes it: both orders process exactly the same N files,
+     * and the only thing that changes is the sequence they are visited in.
+     */
+#if LIMIT > 0
+    if (g_count > LIMIT) g_count = LIMIT;
+#endif
+
 #if ORDER == 1
     for (int i = g_count - 1; i > 0; i--) {
         int j = (int)(rnd() % (unsigned)(i + 1));
@@ -388,10 +398,6 @@ int main(void)
     say("order: shuffled");
 #else
     say("order: as enumerated");
-#endif
-
-#if LIMIT > 0
-    if (g_count > LIMIT) g_count = LIMIT;
 #endif
     say("processing %d files", g_count);
 

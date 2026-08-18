@@ -107,8 +107,7 @@ def plan_main():
         for t in TIMINGS:
             for rep in range(5):
                 jobs.append(dict(tool="c", shape=sh, limit=200, order=0,
-                                 timing=t, effects=0, fake=0, rep=rep,
-                                 group="timing"))
+                                 timing=t, effects=0, fake=0, rep=rep))
 
     # Import table: the same subset with a ransomware-shaped import list
     for sh in SUBSET:
@@ -116,6 +115,33 @@ def plan_main():
             for rep in range(2):
                 jobs.append(dict(tool="c", shape=sh, limit=lim, order=0,
                                  timing=0, effects=0, fake=1, rep=rep))
+    return jobs
+
+
+def plan_order():
+    """
+    The order pair, rebuilt.
+
+    The first run of this pair was not controlled: the shuffle happened
+    before the list was cut to the limit, so the two orders processed
+    different files and differed in call count by 18% as well as in
+    sequence. With that fixed in hardneg_matrix.c, the pair is worth
+    repeating on its own -- it is the only comparison in the grid where
+    every count is identical, which makes it the only one whose outcome
+    cannot be explained by volume.
+
+    Ten shapes at three volumes, both orders, five repeats: 300 binaries,
+    which is a few hours on two machines rather than the day the whole grid
+    took.
+    """
+    jobs = []
+    for sh in SHAPES:
+        for lim in (200, 500, 2000):
+            for order in ORDERS:
+                for rep in range(5):
+                    jobs.append(dict(tool="c", shape=sh, limit=lim,
+                                     order=order, timing=0, effects=0,
+                                     fake=0, rep=rep, group="order2"))
     return jobs
 
 
@@ -137,10 +163,7 @@ def name_of(j):
     parts = [f"x{j['tool']}", letter, f"l{j['limit']}"]
     if j["order"]:
         parts.append("rand")
-    # The timing group carries TIMING=0 as its own baseline, and without a
-    # marker those twenty take the same name as the main grid and overwrite
-    # it -- 920 rows in the manifest, 900 files on disk.
-    if j.get("group") == "timing":
+    if j["timing"]:
         parts.append(f"t{j['timing']}")
     if j["effects"]:
         parts.append(f"e{j['effects']}")
@@ -153,8 +176,7 @@ def name_of(j):
 def build_c(j, out, src):
     flags = [f"-DSHAPE={j['shape']}", f"-DLIMIT={j['limit']}",
              f"-DORDER={j['order']}", f"-DTIMING={j['timing']}",
-             f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}",
-             f"-DBUILD_REP={j['rep']}"]
+             f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}"]
     # The fake-import build references networking, shell and service APIs
     # that live outside the default link set, so those libraries have to be
     # named. They are only linked for that build: adding them everywhere
@@ -172,7 +194,7 @@ def build_go(j, out, srcdir):
     ld = " ".join(f"-X main.{k}={v}" for k, v in
                   (("shape", j["shape"]), ("limit", j["limit"]),
                    ("order", j["order"]), ("timing", j["timing"]),
-                   ("effects", j["effects"]), ("rep", j["rep"])))
+                   ("effects", j["effects"])))
     env = dict(os.environ, GOOS="windows", GOARCH="amd64", CGO_ENABLED="0")
     return subprocess.run(["go", "build", "-ldflags", ld, "-o", out, "."],
                           cwd=srcdir, capture_output=True, text=True, env=env)
@@ -182,7 +204,7 @@ def build_rust(j, out, srcdir):
     env = dict(os.environ,
                HN_SHAPE=str(j["shape"]), HN_LIMIT=str(j["limit"]),
                HN_ORDER=str(j["order"]), HN_TIMING=str(j["timing"]),
-               HN_EFFECTS=str(j["effects"]), HN_REP=str(j["rep"]))
+               HN_EFFECTS=str(j["effects"]))
     r = subprocess.run(["cargo", "build", "--release",
                         "--target", "x86_64-pc-windows-gnu"],
                        cwd=srcdir, capture_output=True, text=True, env=env)
@@ -200,7 +222,7 @@ def build_rust(j, out, srcdir):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--outdir", default="./hn3")
-    parser.add_argument("--plan", choices=["main", "extra", "all"],
+    parser.add_argument("--plan", choices=["main", "extra", "order", "all"],
                          default="main")
     parser.add_argument("--src", default=".",
                          help="Directory holding hardneg_matrix.c, go/ and rust/")
@@ -216,6 +238,8 @@ def main():
         jobs += plan_main()
     if args.plan in ("extra", "all"):
         jobs += plan_extra()
+    if args.plan == "order":
+        jobs = plan_order()
     jobs = [j for j in jobs if j["tool"] not in args.skip]
 
     outdir = os.path.expanduser(args.outdir)

@@ -358,14 +358,41 @@ def main():
     # false positive rate is always reported on the held-out ones, so it
     # remains a rate on software the model has not seen however the split
     # falls.
+    # When build_dataset used --simple-split, every negative carries a
+    # split and the benign corpus is no longer divided across the folds:
+    # the held-out negatives are the test set, whichever kind they are.
+    simple = any(rows[i].get("split") in ("train", "holdout")
+                 and source[i] == "benign" for i in range(len(rows)))
+
     hard_all = [i for i in range(len(rows)) if source[i] == "hardneg"]
     hard_train = [i for i in hard_all if rows[i].get("split") == "train"]
     hard_idx = [i for i in hard_all if i not in set(hard_train)]
+
+    if simple:
+        # One negative class. The benign runs that executed and the hard
+        # negatives are the same thing for this purpose -- software that ran
+        # and did something -- so they are trained on and measured together,
+        # and the two false positive columns become one number reported
+        # twice.
+        benign_train = [i for i in benign_idx if rows[i].get("split") == "train"]
+        benign_hold = [i for i in benign_idx if rows[i].get("split") == "holdout"]
+        hard_idx = hard_idx + benign_hold
+        benign_idx = benign_train
+        print(f"simple split: {len(benign_train)} benign and "
+              f"{len(hard_train)} hard negatives in training, "
+              f"{len(hard_idx)} negatives held out and measured")
+
+    hard_fold.update({i: int(k) for i, k in
+                      zip(hard_idx,
+                          rng.integers(0, len(fold_families), len(hard_idx)))})
     benign_fold = {i: int(k) for i, k in
                    zip(benign_idx, rng.integers(0, len(fold_families), len(benign_idx)))}
-    hard_fold = {i: int(k) for i, k in
-                 zip(hard_all, rng.integers(0, len(fold_families), len(hard_all)))}
-    if hard_train:
+    # Assigned after hard_idx is settled, since under the simple split it
+    # also contains held-out benign runs.
+    hard_fold = {}
+    if simple:
+        pass
+    elif hard_train:
         print(f"negatives: benign {len(benign_idx)} split across folds, "
               f"{len(hard_train)} hard negatives in training, "
               f"{len(hard_idx)} held out and measured")
@@ -509,7 +536,11 @@ def main():
             test_pos = [i for i in (stage2_only if stage2_only is not None
                                      else range(len(rows)))
                         if y[i] == 1 and family[i] == fam]
-            test_neg = [i for i in benign_idx if benign_fold[i] == k]
+            test_neg = [i for i in benign_idx if benign_fold.get(i) == k]
+            if simple:
+                # The held-out negatives are spread across the folds so that
+                # every fold has some to be wrong about.
+                test_neg = [i for i in hard_idx if hard_fold.get(i) == k]
             if stage2_only is not None:
                 # With the benign corpus gone from this stage, the held-out
                 # hard negatives are the negatives. They are split across the
@@ -603,7 +634,11 @@ def main():
             test_pos = [i for i in (stage2_only if stage2_only is not None
                                      else range(len(rows)))
                         if y[i] == 1 and family[i] == fam]
-            test_neg = [i for i in benign_idx if benign_fold[i] == k]
+            test_neg = [i for i in benign_idx if benign_fold.get(i) == k]
+            if simple:
+                # The held-out negatives are spread across the folds so that
+                # every fold has some to be wrong about.
+                test_neg = [i for i in hard_idx if hard_fold.get(i) == k]
             if stage2_only is not None:
                 # With the benign corpus gone from this stage, the held-out
                 # hard negatives are the negatives. They are split across the

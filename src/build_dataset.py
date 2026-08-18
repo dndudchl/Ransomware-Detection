@@ -123,6 +123,13 @@ def main():
     parser.add_argument("--hardneg-manifest", nargs="*", default=[],
                          help="Manifests carrying a category column, used to "
                               "decide which hard negatives may be trained on")
+    parser.add_argument("--simple-split", type=float, default=0.0,
+                         help="Put this fraction of every negative -- the "
+                              "benign runs that executed and all the hard "
+                              "negatives alike -- into training, and hold the "
+                              "rest back. Replaces the separate handling of "
+                              "the two, and drops the benign runs that never "
+                              "executed.")
     parser.add_argument("--hardneg-train-frac", type=float, default=0.0,
                          help="Fraction of the harmless hard negatives to put "
                               "into training. The rest, and everything that "
@@ -282,7 +289,56 @@ def main():
         return "_".join(keep[:3]) if keep else base
 
     n_train = 0
-    if args.hardneg_train_frac > 0:
+    if args.simple_split > 0:
+        # One negative class, split once.
+        #
+        # The arrangement this replaces treated the two kinds of negative
+        # differently: the benign corpus was divided across the folds and the
+        # hard negatives were held out entirely. That made sense when there
+        # were sixty-eight of the latter and they were the only way to
+        # measure anything. It does not now.
+        #
+        # It also left the classes badly matched. Of 1,563 benign programs,
+        # 1,262 never executed, and a run with no behaviour to describe adds
+        # nothing to a model built on behaviour -- measured directly, removing
+        # them changes the false positive rate by 0.012. What remains, 301
+        # benign runs and 1,513 hard negatives, is 1,814 against 1,849
+        # positives, which needs no special handling at all.
+        #
+        # The split is by kind rather than at random, for the same reason as
+        # before: a variant at fifty files and the same variant at a thousand
+        # are one program, and putting one in training and the other in the
+        # test set measures nothing.
+        for r in deduped:
+            r["split"] = ""
+        negatives = []
+        for r in deduped:
+            if r["source"] == "hardneg":
+                negatives.append(r)
+            elif r["source"] == "benign":
+                if r.get("coverage") == "full":
+                    negatives.append(r)
+                else:
+                    r["_drop"] = True     # never executed
+        dropped_inert = sum(1 for r in deduped if r.get("_drop"))
+        deduped = [r for r in deduped if not r.get("_drop")]
+
+        kinds = sorted({kind_of(r["sample_id"]) for r in negatives})
+        cut = int(len(kinds) * args.simple_split)
+        train_kinds = set(kinds[:cut])
+        for r in negatives:
+            if r.get("_drop"):
+                continue
+            r["split"] = ("train" if kind_of(r["sample_id"]) in train_kinds
+                          else "holdout")
+        n_train = sum(1 for r in negatives if r.get("split") == "train")
+        n_hold = sum(1 for r in negatives if r.get("split") == "holdout")
+        print(f"simple split: dropped {dropped_inert} benign runs that never "
+              f"executed")
+        print(f"   negatives {n_train} training / {n_hold} held out, "
+              f"from {len(train_kinds)} of {len(kinds)} kinds")
+
+    elif args.hardneg_train_frac > 0:
         harmless = []
         for r in deduped:
             if r["source"] != "hardneg":

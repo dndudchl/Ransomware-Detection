@@ -237,3 +237,4 @@ dropped/
 # Large / temporary artifacts
 *.7z
 *.etl
+*.bak

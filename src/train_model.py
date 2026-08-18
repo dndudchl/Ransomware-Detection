@@ -253,6 +253,17 @@ def main():
                               "its own fold")
     parser.add_argument("--min-calls", type=int, default=500)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--volume-shift", type=float, default=0.0,
+                         help="Train only on negatives below this many files "
+                              "and measure only on those above it. Volume "
+                              "features are then trained on a range they will "
+                              "not be tested in; relational ones are not, "
+                              "because a relation does not move with scale.")
+    parser.add_argument("--volume-band", type=float, nargs=2, default=None,
+                         metavar=("LOW", "HIGH"),
+                         help="Keep only rows opening between LOW and HIGH "
+                              "files, so volume is near-constant and cannot "
+                              "separate anything")
     parser.add_argument("--match-volume", action="store_true",
                          help="Subsample the training set so the two classes "
                               "have the same distribution of file counts, "
@@ -401,6 +412,60 @@ def main():
         print(f"negatives: benign {len(benign_idx)} split across folds, "
               f"hard negatives {len(hard_idx)} held out of training entirely")
 
+    def paths_of_row(i):
+        v = to_float(rows[i].get("n_paths"))
+        return 0.0 if math.isnan(v) else v
+
+    # A band of near-constant volume.
+    #
+    # The two-stage filter cut at a threshold and left a range above it that
+    # the ransomware still sat higher in. Keeping only the rows inside a band
+    # removes that: everything left opens roughly the same number of files,
+    # so the count cannot separate the classes and whatever does is something
+    # else.
+    band_keep = None
+    if args.volume_band:
+        lo, hi = args.volume_band
+        band_keep = {i for i in range(len(rows)) if lo <= paths_of_row(i) < hi}
+        pos_n = sum(1 for i in band_keep if y[i] == 1)
+        print(f"\nvolume band {lo:.0f}-{hi:.0f}: {len(band_keep)} rows, "
+              f"{pos_n} positive, {len(band_keep) - pos_n} negative")
+        benign_idx = [i for i in benign_idx if i in band_keep]
+        hard_idx = [i for i in hard_idx if i in band_keep]
+        hard_train = [i for i in hard_train if i in band_keep]
+
+    # Trained low, measured high.
+    #
+    # A count learned on runs that open fifty files says nothing useful about
+    # a run that opens two thousand: the thresholds a tree picked are all in
+    # the wrong place. A relation does not have that problem, because the
+    # share of reads that were followed by a write is the same quantity at
+    # either scale.
+    #
+    # So this is the sharpest test of whether the relational features are
+    # doing work the volume features cannot. If the volume group collapses
+    # and the relational group holds, they measure different things.
+    shift_train = shift_test = None
+    if args.volume_shift > 0:
+        cut = args.volume_shift
+        shift_train = {i for i in range(len(rows)) if paths_of_row(i) < cut}
+        shift_test = {i for i in range(len(rows)) if paths_of_row(i) >= cut}
+        print(f"\nvolume shift at {cut:.0f} files")
+        for name, s_ in (("train", shift_train), ("measure", shift_test)):
+            p_ = sum(1 for i in s_ if y[i] == 1)
+            print(f"   {name:<9}{len(s_):>6} rows, {p_} positive, "
+                  f"{len(s_) - p_} negative")
+        # Negatives above the cut become the measurement set whether or not
+        # they were marked for training, since nothing above the cut is
+        # trained on at all.
+        hard_idx = [i for i in range(len(rows))
+                    if source[i] in ("hardneg", "benign") and i in shift_test]
+        hard_train = [i for i in hard_train if i in shift_train]
+        benign_idx = [i for i in benign_idx if i in shift_train]
+        hard_fold.update({i: int(k) for i, k in
+                          zip(hard_idx,
+                              rng.integers(0, len(fold_families), len(hard_idx)))})
+
     # Matched volume.
     #
     # The two-stage filter cuts at a threshold, and above that threshold the
@@ -534,11 +599,14 @@ def main():
         hard_scores = []
 
         for k, fam in enumerate(fold_families):
-            test_pos = [i for i in (stage2_only if stage2_only is not None
-                                     else range(len(rows)))
+            scope = (stage2_only if stage2_only is not None
+                     else band_keep if band_keep is not None
+                     else shift_test if shift_test is not None
+                     else range(len(rows)))
+            test_pos = [i for i in scope
                         if y[i] == 1 and family[i] == fam]
             test_neg = [i for i in benign_idx if benign_fold.get(i) == k]
-            if simple:
+            if simple or shift_test is not None:
                 # The held-out negatives are spread across the folds so that
                 # every fold has some to be wrong about.
                 test_neg = [i for i in hard_idx if hard_fold.get(i) == k]
@@ -549,6 +617,10 @@ def main():
                 test_neg += [i for i in hard_idx if hard_fold.get(i) == k]
             test = test_pos + test_neg
             pool = stage2_only if stage2_only is not None else range(len(rows))
+            if band_keep is not None:
+                pool = [i for i in pool if i in band_keep]
+            if shift_train is not None:
+                pool = [i for i in pool if i in shift_train]
             if match_keep is not None:
                 pool = [i for i in pool if i in match_keep]
             train = [i for i in pool
@@ -632,11 +704,14 @@ def main():
         prng = np.random.default_rng(args.seed + 1)
 
         for k, fam in enumerate(fold_families):
-            test_pos = [i for i in (stage2_only if stage2_only is not None
-                                     else range(len(rows)))
+            scope = (stage2_only if stage2_only is not None
+                     else band_keep if band_keep is not None
+                     else shift_test if shift_test is not None
+                     else range(len(rows)))
+            test_pos = [i for i in scope
                         if y[i] == 1 and family[i] == fam]
             test_neg = [i for i in benign_idx if benign_fold.get(i) == k]
-            if simple:
+            if simple or shift_test is not None:
                 # The held-out negatives are spread across the folds so that
                 # every fold has some to be wrong about.
                 test_neg = [i for i in hard_idx if hard_fold.get(i) == k]
@@ -647,6 +722,10 @@ def main():
                 test_neg += [i for i in hard_idx if hard_fold.get(i) == k]
             test = test_pos + test_neg
             pool = stage2_only if stage2_only is not None else range(len(rows))
+            if band_keep is not None:
+                pool = [i for i in pool if i in band_keep]
+            if shift_train is not None:
+                pool = [i for i in pool if i in shift_train]
             if match_keep is not None:
                 pool = [i for i in pool if i in match_keep]
             train = [i for i in pool

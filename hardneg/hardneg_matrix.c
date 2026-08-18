@@ -74,6 +74,27 @@
 #ifndef EFFECTS
 #define EFFECTS 0 /* bitmask: 1 note, 2 wallpaper, 4 shadow, 8 recovery, 16 service */
 #endif
+#ifndef BUILD_REP
+/* Repeats of the same parameters must differ as files.
+ *
+ * Without this the compiler emits the identical binary for every repeat, the
+ * pipeline drops duplicate hashes, and five repeats become one row. The
+ * repeats are wanted: they measure how much the sandbox varies between runs
+ * of the same program, which is the floor under any difference the grid
+ * shows.
+ *
+ * The value has to reach something the compiler cannot fold away, which is
+ * why it goes into a string the program prints rather than into an integer
+ * an optimiser can see is unused.
+ */
+#define BUILD_REP 0
+#endif
+#define STR2(x) #x
+#define STR(x) STR2(x)
+static const char BUILD_TAG[] =
+    "hardneg build rep=" STR(BUILD_REP)
+    " shape=" STR(SHAPE) " limit=" STR(LIMIT) " order=" STR(ORDER);
+
 #ifndef FAKE_IMPORTS
 /* Reference the API categories ransomware imports, without calling them for
  * any purpose. Every hard negative so far is a small C binary with about
@@ -356,6 +377,7 @@ int main(void)
 {
     say("matrix: shape=%d limit=%d order=%d timing=%d effects=%d fake=%d",
         SHAPE, LIMIT, ORDER, TIMING, EFFECTS, FAKE_IMPORTS);
+    say("%s", BUILD_TAG);
 #if FAKE_IMPORTS
     reference_only();
 #endif

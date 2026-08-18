@@ -76,6 +76,24 @@ def stem(name):
     return os.path.splitext(os.path.basename(name))[0]
 
 
+def load_names(path):
+    """
+    sample_id -> the filename the sandbox was given.
+
+    The scores are keyed by task number, which says nothing about what the
+    program was; the manifests are keyed by filename, which is the only thing
+    that does. Without this table the two cannot be joined and every fold
+    below is empty.
+    """
+    if not path:
+        return {}
+    out = {}
+    for r in read(path):
+        if r.get("sample_id") and r.get("filename"):
+            out[r["sample_id"]] = r["filename"]
+    return out
+
+
 def load_manifests(manifest, scripts):
     """
     One table describing every variant, from however many manifests.
@@ -193,6 +211,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--scripts")
+    parser.add_argument("--names",
+                         help="CSV of sample_id,filename joining the score "
+                              "file's task numbers to the manifests")
     parser.add_argument("--scores", required=True,
                          help="Model predictions: sample_id, flag_rate")
     parser.add_argument("--features",
@@ -202,7 +223,9 @@ def main():
     args = parser.parse_args()
 
     spec = load_manifests(args.manifest, args.scripts)
-    print(f"{len(spec)} variants described")
+    names = load_names(args.names)
+    print(f"{len(spec)} variants described"
+          + (f", {len(names)} sample ids resolved to filenames" if names else ""))
 
     feat = {}
     if args.features:
@@ -213,8 +236,11 @@ def main():
     rows, unmatched = [], 0
     for r in read(args.scores):
         sid = r.get("sample_id") or r.get("task_id") or ""
-        # Scores are keyed by task, features by filename; try both.
+        # Three ways in: the id is already a variant name, the names table
+        # maps it to one, or the feature row carries one.
         s = spec.get(stem(sid))
+        if s is None and sid in names:
+            s = spec.get(stem(names[sid]))
         if s is None and sid in feat:
             s = spec.get(stem(feat[sid].get("filename", "")))
         if s is None:
@@ -237,8 +263,10 @@ def main():
     print(f"{len(rows)} matched to a score" +
           (f", {unmatched} unmatched" if unmatched else ""))
     if not rows:
-        print("nothing to fold; check that the score file uses the same "
-              "identifiers as the manifest")
+        print()
+        print("Nothing to fold. The score file is keyed by sandbox task "
+              "number and the manifests by filename, so the two need a table")
+        print("joining them:  --names ~/work/hardneg_names.csv")
         return
 
     with open(args.out, "w", newline="") as f:

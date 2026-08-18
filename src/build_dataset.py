@@ -323,20 +323,41 @@ def main():
         dropped_inert = sum(1 for r in deduped if r.get("_drop"))
         deduped = [r for r in deduped if not r.get("_drop")]
 
-        kinds = sorted({kind_of(r["sample_id"]) for r in negatives})
-        cut = int(len(kinds) * args.simple_split)
-        train_kinds = set(kinds[:cut])
-        for r in negatives:
-            if r.get("_drop"):
-                continue
+        # The two kinds of negative are split differently, because "kind"
+        # means something for one and nothing for the other.
+        #
+        # A hard negative has siblings: the same variant at another size, or
+        # another repeat. Those have to stay on the same side, or the model
+        # is tested on a program it trained on at a different volume.
+        #
+        # A benign program has none. Its identifier is a hash and every one
+        # is its own kind, so splitting them by kind is splitting them at
+        # random with extra steps -- and worse, it lets 700 benign
+        # single-member kinds crowd out the hard negatives when the quota is
+        # counted in kinds rather than rows.
+        hard = [r for r in negatives if r["source"] == "hardneg"]
+        ben = [r for r in negatives if r["source"] == "benign"]
+
+        hkinds = sorted({kind_of(r["sample_id"]) for r in hard})
+        train_kinds = set(hkinds[:int(len(hkinds) * args.simple_split)])
+        for r in hard:
             r["split"] = ("train" if kind_of(r["sample_id"]) in train_kinds
                           else "holdout")
+
+        ben.sort(key=lambda r: r["sample_id"])
+        cut_b = int(len(ben) * args.simple_split)
+        for i, r in enumerate(ben):
+            r["split"] = "train" if i < cut_b else "holdout"
+
         n_train = sum(1 for r in negatives if r.get("split") == "train")
         n_hold = sum(1 for r in negatives if r.get("split") == "holdout")
+        print(f"   hard negatives {sum(1 for r in hard if r['split']=='train')}"
+              f" / {sum(1 for r in hard if r['split']=='holdout')}"
+              f" from {len(train_kinds)} of {len(hkinds)} kinds")
+        print(f"   benign         {cut_b} / {len(ben)-cut_b}")
         print(f"simple split: dropped {dropped_inert} benign runs that never "
               f"executed")
-        print(f"   negatives {n_train} training / {n_hold} held out, "
-              f"from {len(train_kinds)} of {len(kinds)} kinds")
+        print(f"   negatives {n_train} training / {n_hold} held out")
 
     elif args.hardneg_train_frac > 0:
         harmless = []

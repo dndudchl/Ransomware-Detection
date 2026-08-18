@@ -127,6 +127,11 @@ def main():
                          help="Fraction of the harmless hard negatives to put "
                               "into training. The rest, and everything that "
                               "destroyed anything, stay held out.")
+    parser.add_argument("--exclude-failed-only", action="store_true",
+                         help="Keep every ransomware run that executed, "
+                              "encrypting or not, and drop only the ones that "
+                              "never started. A middle position between the "
+                              "two below.")
     parser.add_argument("--keep-nonencrypting", action="store_true",
                          help="Keep ransomware runs that executed without "
                               "encrypting, as positives. Off by default; see "
@@ -176,9 +181,18 @@ def main():
     kept, dropped_middle = [], 0
     for r in rows:
         if r["source"] == "ransomware":
-            if r.get("verdict") == "TRUE_ENCRYPTION":
+            v = r.get("verdict", "")
+            if v == "TRUE_ENCRYPTION":
                 r["y"] = "1"
             elif args.keep_nonencrypting:
+                r["y"] = "1"
+            elif args.exclude_failed_only and v not in ("FAILED", ""):
+                # It ran; it just did not encrypt anything the sandbox saw.
+                # Whether that belongs in the positive class depends on what
+                # the model is for: a detector meant to catch ransomware
+                # before it triggers has to recognise these, and one meant to
+                # recognise encryption cannot learn it from runs where none
+                # happened.
                 r["y"] = "1"
             else:
                 dropped_middle += 1

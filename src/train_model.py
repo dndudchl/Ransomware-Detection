@@ -253,6 +253,13 @@ def main():
                               "its own fold")
     parser.add_argument("--min-calls", type=int, default=500)
     parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--match-volume", action="store_true",
+                         help="Subsample the training set so the two classes "
+                              "have the same distribution of file counts, "
+                              "which removes volume as something the model "
+                              "can use rather than merely discouraging it")
+    parser.add_argument("--match-bins", type=int, default=8,
+                         help="How many bands to match within")
     parser.add_argument("--two-stage", action="store_true",
                          help="Train and evaluate only on runs that opened at "
                               "least --stage1-paths files, as a second stage "
@@ -366,6 +373,53 @@ def main():
         print(f"negatives: benign {len(benign_idx)} split across folds, "
               f"hard negatives {len(hard_idx)} held out of training entirely")
 
+    # Matched volume.
+    #
+    # The two-stage filter cuts at a threshold, and above that threshold the
+    # ransomware is still busier than the negatives -- a median of 578 files
+    # against rather fewer. So volume is reduced but not removed, and a model
+    # can still lean on what is left.
+    #
+    # Matching removes it properly. The rows are placed in bands by file
+    # count, and within each band the larger class is cut down to the size of
+    # the smaller. The marginal distribution of file count is then identical
+    # for the two classes, and a model that separates them is separating them
+    # on something else, because there is nothing left in the file count to
+    # separate on.
+    #
+    # The cost is samples: bands where one class is absent contribute
+    # nothing, and the training set shrinks to roughly twice the size of the
+    # smaller class summed over bands.
+    match_keep = None
+    if args.match_volume:
+        def paths_of(i):
+            v = to_float(rows[i].get("n_paths"))
+            return 0.0 if math.isnan(v) else v
+
+        edges = [0, 1, 10, 50, 200, 500, 1000, 2000, float("inf")]
+        edges = edges[:args.match_bins + 1]
+        keep = set()
+        print("\nmatched volume: bands of file count, "
+              "each class cut to the smaller")
+        print(f"   {'band':<14}{'positives':>10}{'negatives':>10}{'kept each':>11}")
+        for lo, hi in zip(edges, edges[1:]):
+            pos = [i for i in range(len(rows))
+                   if y[i] == 1 and lo <= paths_of(i) < hi]
+            neg = [i for i in range(len(rows))
+                   if y[i] == 0 and lo <= paths_of(i) < hi]
+            take = min(len(pos), len(neg))
+            label = f"{lo:.0f}-{'' if hi == float('inf') else f'{hi:.0f}'}"
+            print(f"   {label:<14}{len(pos):>10}{len(neg):>10}{take:>11}")
+            if take == 0:
+                continue
+            # numpy's Generator shuffles arrays, not lists; permutation
+            # gives indices back in a form that works for both.
+            pos = [pos[k] for k in rng.permutation(len(pos))]
+            neg = [neg[k] for k in rng.permutation(len(neg))]
+            keep.update(pos[:take]); keep.update(neg[:take])
+        match_keep = keep
+        print(f"   {len(keep)} rows retained of {len(rows)}")
+
     # Two stages.
     #
     # The whole difficulty is that the file count separates the classes on
@@ -463,6 +517,8 @@ def main():
                 test_neg += [i for i in hard_idx if hard_fold.get(i) == k]
             test = test_pos + test_neg
             pool = stage2_only if stage2_only is not None else range(len(rows))
+            if match_keep is not None:
+                pool = [i for i in pool if i in match_keep]
             train = [i for i in pool
                      if i not in set(test) and i not in set(hard_idx)
                      and not (y[i] == 1 and family[i] == fam)]
@@ -555,6 +611,8 @@ def main():
                 test_neg += [i for i in hard_idx if hard_fold.get(i) == k]
             test = test_pos + test_neg
             pool = stage2_only if stage2_only is not None else range(len(rows))
+            if match_keep is not None:
+                pool = [i for i in pool if i in match_keep]
             train = [i for i in pool
                      if i not in set(test) and i not in set(hard_idx)
                      and not (y[i] == 1 and family[i] == fam)]

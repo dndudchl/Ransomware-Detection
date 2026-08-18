@@ -308,13 +308,6 @@ def main():
                               "importance measures the same thing without that "
                               "problem, and without retraining.")
     parser.add_argument("--importance-out", default="/tmp/importance.csv")
-    parser.add_argument("--hard-out-groups",
-                         help="Per-variant flag rate under every feature set, "
-                              "one column per group. The single-model file "
-                              "says which programs the detector confuses with "
-                              "ransomware; this one says which feature sets "
-                              "are doing the confusing, which is the question "
-                              "an ablation is actually asking.")
     parser.add_argument("--hard-out", default="/tmp/hardneg_scores.csv",
                          help="Per-variant record of how often each hard "
                               "negative was flagged, which is what turns "
@@ -857,18 +850,6 @@ def main():
                             f"{full_for_hard['hard_flagged'][pos] / max(1, full_for_hard['n_folds']):.4f}",
                             f"{full_for_hard['hard_mean_score'][pos]:.4f}"])
         print(f"[saved] {args.hard_out}")
-
-    # The same variants scored under each feature set. Every group's run
-    # already computed this; only the last one was being kept.
-    if hard_idx and args.hard_out_groups:
-        with open(args.hard_out_groups, "w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["sample_id"] + [r["group"] for r in results])
-            for pos, i in enumerate(hard_idx):
-                w.writerow([rows[i]["sample_id"]] +
-                           [f"{r['hard_flagged'][pos] / max(1, r['n_folds']):.4f}"
-                            for r in results])
-        print(f"[saved] {args.hard_out_groups}")
 
     if args.importance:
         all_cols = [c for g in GROUPS for c in present[g]]

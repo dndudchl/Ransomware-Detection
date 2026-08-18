@@ -176,7 +176,8 @@ def name_of(j):
 def build_c(j, out, src):
     flags = [f"-DSHAPE={j['shape']}", f"-DLIMIT={j['limit']}",
              f"-DORDER={j['order']}", f"-DTIMING={j['timing']}",
-             f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}"]
+             f"-DEFFECTS={j['effects']}", f"-DFAKE_IMPORTS={j['fake']}",
+             f"-DBUILD_REP={j['rep']}"]
     # The fake-import build references networking, shell and service APIs
     # that live outside the default link set, so those libraries have to be
     # named. They are only linked for that build: adding them everywhere

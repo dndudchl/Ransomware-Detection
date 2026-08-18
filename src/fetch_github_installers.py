@@ -163,13 +163,16 @@ def main():
                               "requests an hour, which is enough for this list.")
     parser.add_argument("--extra", nargs="*", default=[],
                          help="Additional owner/repo entries")
+    parser.add_argument("--only-extra", action="store_true",
+                         help="Query only --extra; the built-in list\n                               has already been collected.")
     parser.add_argument("--list-only", action="store_true")
     args = parser.parse_args()
 
     outdir = os.path.expanduser(args.outdir)
     os.makedirs(outdir, exist_ok=True)
 
-    repos = PROJECTS + list(args.extra)
+    repos = (list(args.extra) if args.only_extra
+             else PROJECTS + list(args.extra))
     print(f"querying {len(repos)} projects")
 
     found, missing = [], []

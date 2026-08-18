@@ -549,6 +549,103 @@ def set_relation_features(behavior):
     }
 
 
+# The categories CAPE assigns to every call. Using its vocabulary rather than
+# one derived from what ransomware does is what keeps this out of the
+# circular set: "filesystem followed by crypto" is a fact about the call
+# stream, whereas "enumeration followed by shadow deletion" would be a
+# restatement of the label.
+#
+# Fifteen categories give 225 possible transitions and 182 were seen in a
+# sample of twenty runs, most of them rarely. The ones kept below are the
+# pairs that occur often enough to be measured, chosen by frequency across
+# the corpus rather than by what seems meaningful -- picking the interesting
+# ones by hand would put the same judgement back in.
+TRANSITION_CATEGORIES = (
+    "filesystem", "registry", "process", "crypto", "network",
+    "system", "threading", "synchronization", "windows", "misc",
+)
+
+
+def transition_matrix_features(behavior):
+    """
+    Which kind of call follows which, and how quickly.
+
+    Every sequence feature so far summarises the stream into one number --
+    how often it switches category, how uneven the API distribution is. This
+    keeps the pairs apart, because the pairs are where the claim lives: a
+    program that reads a file and then encrypts it is doing something a
+    program that reads a file and then writes to the registry is not, and a
+    switch-rate cannot tell them apart.
+
+    Two values per pair. The share says how much of the run was spent in that
+    transition. The second says how often the two calls were more than a
+    millisecond apart -- how often, in other words, they were separate
+    decisions rather than one step.
+
+    That second value is the part no existing feature has. Adjacency in a
+    call stream is cheap, since everything is adjacent to something; what
+    distinguishes a causal step from a coincidence is whether anything
+    happened in between.
+    """
+    from datetime import datetime
+
+    seq = []
+    for process in behavior.get("processes", []) or []:
+        for call in process.get("calls", []) or []:
+            cat = call.get("category")
+            if cat not in TRANSITION_CATEGORIES:
+                continue
+            t = call.get("time") or call.get("timestamp")
+            stamp = None
+            if isinstance(t, (int, float)):
+                stamp = float(t)
+            elif isinstance(t, str):
+                try:
+                    stamp = datetime.strptime(
+                        t, "%Y-%m-%d %H:%M:%S,%f").timestamp()
+                except (ValueError, TypeError):
+                    stamp = None
+            seq.append((cat, stamp))
+
+    out = {}
+    if len(seq) < 50:
+        for a in TRANSITION_CATEGORIES:
+            for b in TRANSITION_CATEGORIES:
+                out[f"tr_{a[:4]}_{b[:4]}"] = ""
+                out[f"trgap_{a[:4]}_{b[:4]}"] = ""
+        return out
+
+    counts = Counter()
+    gaps = defaultdict(list)
+    for (a, ta), (b, tb) in zip(seq, seq[1:]):
+        counts[(a, b)] += 1
+        if ta is not None and tb is not None:
+            d = tb - ta
+            if 0 <= d < 60:
+                gaps[(a, b)].append(d)
+
+    total = sum(counts.values()) or 1
+    for a in TRANSITION_CATEGORIES:
+        for b in TRANSITION_CATEGORIES:
+            key = (a, b)
+            out[f"tr_{a[:4]}_{b[:4]}"] = round(counts.get(key, 0) / total, 5)
+
+            # The timestamps are recorded to the millisecond and consecutive
+            # calls usually share one, so a median gap is zero for almost
+            # every pair and carries nothing. What does vary is how often the
+            # two calls are far enough apart to have been separate decisions:
+            # a loop reading and encrypting stays inside one millisecond
+            # every time, while a program that touches the registry seconds
+            # after a file read was doing two unrelated things.
+            g = gaps.get(key)
+            if g and len(g) >= 5:
+                apart = sum(1 for x in g if x >= 0.001)
+                out[f"trgap_{a[:4]}_{b[:4]}"] = round(apart / len(g), 4)
+            else:
+                out[f"trgap_{a[:4]}_{b[:4]}"] = ""
+    return out
+
+
 def latency_features(behavior):
     """
     How long a file waits between being read and being written.
@@ -818,6 +915,7 @@ def process_one(path):
     row.update(stage_features(report))
     row.update(byte_features(behavior))
     row.update(latency_features(behavior))
+    row.update(transition_matrix_features(behavior))
     row.update(traversal_features(behavior))
     row.update(rhythm_features(behavior))
     return row

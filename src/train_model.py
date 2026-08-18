@@ -150,6 +150,28 @@ GROUPS = {
         "rw_latency_median_ms", "rw_latency_cv", "rw_latency_under_100ms",
         "n_read_write_pairs",
     ],
+    # Which category of call follows which, and how often the two were more
+    # than a millisecond apart.
+    #
+    # Its own group because there are two hundred of them and they would
+    # otherwise swamp the fourteen features already in "sequence", making the
+    # ablation step unreadable: a change when sequence is added could be the
+    # transition matrix or could be everything else, and the two say
+    # different things.
+    #
+    # The vocabulary is CAPE's own call categories rather than one derived
+    # from what ransomware does, which is what keeps these out of the
+    # circular set. Most are near zero for any given run; the model is left
+    # to find which matter.
+    "transition": [
+        f"{p}_{a[:4]}_{b[:4]}"
+        for p in ("tr", "trgap")
+        for a in ("filesystem", "registry", "process", "crypto", "network",
+                  "system", "threading", "synchronization", "windows", "misc")
+        for b in ("filesystem", "registry", "process", "crypto", "network",
+                  "system", "threading", "synchronization", "windows", "misc")
+    ],
+
     # Actions specific to ransomware, kept apart from the relational group.
     #
     # These were in "relation" because they are ransomware-shaped, but they
@@ -183,13 +205,16 @@ CUMULATIVE = [
     ("+ volume", ["static", "volume"]),
     ("+ sequence", ["static", "volume", "sequence"]),
     ("+ relation", ["static", "volume", "sequence", "relation"]),
-    ("+ indicator", ["static", "volume", "sequence", "relation", "indicator"]),
+    ("+ transition", ["static", "volume", "sequence", "relation", "transition"]),
+    ("+ indicator", ["static", "volume", "sequence", "relation",
+                      "transition", "indicator"]),
     ("+ destruction", ["static", "volume", "sequence", "relation",
-                        "indicator", "destruction"]),
+                        "transition", "indicator", "destruction"]),
 ]
 
 # Also run each group on its own, which shows what it carries unaided.
-ALONE = ["static", "volume", "sequence", "relation", "indicator", "destruction"]
+ALONE = ["static", "volume", "sequence", "relation", "transition",
+         "indicator", "destruction"]
 
 
 def to_float(v):

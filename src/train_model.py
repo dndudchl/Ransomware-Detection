@@ -361,6 +361,10 @@ def main():
     # When build_dataset used --simple-split, every negative carries a
     # split and the benign corpus is no longer divided across the folds:
     # the held-out negatives are the test set, whichever kind they are.
+    # Filled in below, once hard_idx is settled: under the simple split it
+    # also holds the benign runs that were held out.
+    hard_fold = {}
+
     simple = any(rows[i].get("split") in ("train", "holdout")
                  and source[i] == "benign" for i in range(len(rows)))
 
@@ -387,9 +391,6 @@ def main():
                           rng.integers(0, len(fold_families), len(hard_idx)))})
     benign_fold = {i: int(k) for i, k in
                    zip(benign_idx, rng.integers(0, len(fold_families), len(benign_idx)))}
-    # Assigned after hard_idx is settled, since under the simple split it
-    # also contains held-out benign runs.
-    hard_fold = {}
     if simple:
         pass
     elif hard_train:

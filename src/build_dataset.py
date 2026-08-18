@@ -60,6 +60,7 @@ Usage
 
 import os
 import csv
+import random
 import argparse
 from collections import Counter, defaultdict
 
@@ -123,6 +124,9 @@ def main():
     parser.add_argument("--hardneg-manifest", nargs="*", default=[],
                          help="Manifests carrying a category column, used to "
                               "decide which hard negatives may be trained on")
+    parser.add_argument("--seed", type=int, default=0,
+                         help="Seed for the training split, so the same "
+                              "division can be reproduced")
     parser.add_argument("--simple-split", type=float, default=0.0,
                          help="Put this fraction of every negative -- the "
                               "benign runs that executed and all the hard "
@@ -338,13 +342,24 @@ def main():
         hard = [r for r in negatives if r["source"] == "hardneg"]
         ben = [r for r in negatives if r["source"] == "benign"]
 
+        # Shuffled, not sorted.
+        #
+        # Taking the first eighty percent of a sorted list of kinds sorts by
+        # name, and the names carry meaning: everything from the designed
+        # grid begins with x, so an alphabetical cut put all 920 of those on
+        # one side and none of them in training. The model then never saw a
+        # compiled variant, which is not the split that was asked for.
+        #
+        # A fixed seed keeps it repeatable.
         hkinds = sorted({kind_of(r["sample_id"]) for r in hard})
+        random.Random(args.seed).shuffle(hkinds)
         train_kinds = set(hkinds[:int(len(hkinds) * args.simple_split)])
         for r in hard:
             r["split"] = ("train" if kind_of(r["sample_id"]) in train_kinds
                           else "holdout")
 
         ben.sort(key=lambda r: r["sample_id"])
+        random.Random(args.seed + 1).shuffle(ben)
         cut_b = int(len(ben) * args.simple_split)
         for i, r in enumerate(ben):
             r["split"] = "train" if i < cut_b else "holdout"

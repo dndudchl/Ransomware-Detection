@@ -111,38 +111,55 @@ def own_pids(procs):
 # --------------------------------------------- command-line behaviours
 
 # Each rule maps a regex over a command line to a behaviour token. The
-# patterns are from the eight reports; a command that matches none is left
-# out rather than forced into a bucket.
+# vocabulary was fixed on 19 Aug after checking every candidate against
+# twelve reports; see vocabulary_decision.md. A command that matches none
+# is left out rather than forced into a bucket.
 COMMAND_RULES = [
-    ("SHADOW_DELETE",    re.compile(r"(?i)(vssadmin|wmic).{0,40}shadow(cop(y|ies))?\s*(delete|/nointeractive)|shadowcopy\s+delete")),
-    ("SHADOW_DELETE",    re.compile(r"(?i)Win32_ShadowCopy")),
-    ("RECOVERY_DISABLE", re.compile(r"(?i)bcdedit.{0,40}(recoveryenabled\s+no|bootstatuspolicy\s+ignore)")),
-    ("BACKUP_DELETE",    re.compile(r"(?i)wbadmin.{0,20}delete|wbadmin.{0,20}catalog")),
+    ("SHADOW_DELETE",    re.compile(r"(?i)(vssadmin|wmic).{0,40}shadow(cop(y|ies))?\s*(delete|/nointeractive)|shadowcopy\s+delete|Win32_ShadowCopy")),
+    # All bcdedit use is one behaviour: recoveryenabled no, bootstatuspolicy
+    # ignoreallfailures, safeboot minimal -- every one is T1490/T1562.009.
+    ("RECOVERY_DISABLE", re.compile(r"(?i)\bbcdedit\b")),
+    ("BACKUP_DELETE",    re.compile(r"(?i)wbadmin.{0,20}(delete|catalog)")),
     ("FIREWALL_DISABLE", re.compile(r"(?i)netsh.{0,40}(firewall|advfirewall).{0,20}(off|disable)")),
+    ("EVENTLOG_CLEAR",   re.compile(r"(?i)wevtutil.{0,10}\bcl\b|Clear-EventLog")),
     ("PERSIST_SCHTASK",  re.compile(r"(?i)schtasks.{0,10}/create")),
-    ("SERVICE_STOP_CMD", re.compile(r"(?i)\bnet\s+stop\b|\bsc\s+(stop|config)\b")),
-    ("PROCESS_KILL_CMD", re.compile(r"(?i)taskkill")),
-    ("EVENTLOG_CLEAR",   re.compile(r"(?i)wevtutil.{0,10}cl|Clear-EventLog")),
-    ("BOOT_CONFIG",      re.compile(r"(?i)bcdedit")),
+    ("PROCESS_KILL",     re.compile(r"(?i)\btaskkill\b")),
+    ("SERVICE_ACCESS",   re.compile(r"(?i)\bnet\s+stop\b|\bsc\s+(stop|config|delete)\b")),
+    # The sample executing a copy of itself from AppData: self-copy then run.
+    ("SELF_COPY",        re.compile(r"(?i)appdata\\(roaming|local)\\[^\\\"]+\.exe")),
 ]
 
 # --------------------------------------------- API-signalled behaviours
 
-# behaviour token -> (api names, minimum count). A single stray call is not
-# a behaviour; the minimum keeps incidental calls out.
+# behaviour token -> (api names, minimum count). The minimum is a floor to
+# keep a stray call from becoming a behaviour, set from the twelve reports:
+# installers sit at 11-13 deletes and 13 renames, ransomware at 20+ for
+# anything it means to do. Not a tuned parameter.
 API_RULES = {
-    "WALLPAPER_SET":   (("SystemParametersInfoW", "SystemParametersInfoA"), 1),
-    "PROCESS_KILL":    (("NtTerminateProcess",), 3),
-    "SERVICE_ACCESS":  (("OpenSCManagerW", "OpenServiceW", "ControlService",
-                         "ChangeServiceConfigW", "DeleteService"), 2),
-    "REGISTRY_PERSIST": (("RegSetValueExW", "RegSetValueExA"), 3),
-    "NETWORK":         (("connect", "WSAConnect", "InternetConnectW",
-                         "InternetOpenUrlW", "HttpSendRequestW"), 1),
-    "RM_SESSION":      (("RmStartSession", "RmRegisterResources"), 1),
-    "CRYPTO_API":      (("CryptEncrypt", "BCryptEncrypt"), 5),
-    "DRIVE_ENUMERATE": (("GetLogicalDrives", "GetDriveTypeW",
-                         "FindFirstVolumeW"), 1),
+    "WALLPAPER_SET":  (("SystemParametersInfoW", "SystemParametersInfoA"), 1),
+    "PROCESS_KILL":   (("NtTerminateProcess",), 3),
+    "PROCESS_ENUM":   (("CreateToolhelp32Snapshot", "Process32FirstW",
+                        "Process32NextW"), 1),
+    "SERVICE_ACCESS": (("OpenSCManagerW", "OpenServiceW", "ControlService",
+                        "ChangeServiceConfigW", "DeleteService"), 2),
+    "REGISTRY_WRITE": (("RegSetValueExW", "RegSetValueExA"), 3),
+    "NETWORK":        (("connect", "WSAConnect", "InternetConnectW",
+                        "InternetOpenUrlW", "HttpSendRequestW"), 1),
+    "RM_SESSION":     (("RmStartSession", "RmRegisterResources"), 1),
+    "CRYPTO_API":     (("CryptEncrypt", "BCryptEncrypt", "CryptGenKey",
+                        "CryptDeriveKey", "BCryptGenerateSymmetricKey"), 5),
+    "DIR_ENUMERATE":  (("FindFirstFileExW", "FindFirstFileW",
+                        "NtQueryDirectoryFile"), 50),
+    "FILE_DELETE":    (("NtDeleteFile", "DeleteFileW"), 20),
+    "FILE_RENAME":    (("MoveFileW", "MoveFileExW", "MoveFileWithProgressW",
+                        "MoveFileWithProgressTransactedW"), 20),
 }
+
+# NtSetInformationFile does different work by class; two classes are
+# behaviours in their own right and are counted into FILE_DELETE and
+# FILE_RENAME alongside the direct APIs above.
+SETINFO_DELETE = "13"      # FileDispositionInformation
+SETINFO_RENAME = "10"      # FileRenameInformation
 
 
 def command_lines(report):
@@ -348,13 +365,36 @@ def detect_behaviours(report):
                 events.append((run_start, -1000 + j, token))
 
     # API-signalled behaviours: anchor to the first qualifying call's time.
+    # NtSetInformationFile with class 10 or 13 is a rename or a delete and is
+    # counted as such, since several families rename and delete that way
+    # rather than through MoveFile/NtDeleteFile.
     api_first = {}       # api -> (ts, index)
     api_count = Counter()
     for ts, i, api, _ in stream:
         api_count[api] += 1
         if api not in api_first:
             api_first[api] = (ts if ts is not None else run_start, i)
+    # second pass for the class-dependent SetInformationFile cases
+    idx2 = 0
+    for p in procs:
+        if p.get("process_id") not in keep:
+            continue
+        for c in p.get("calls", []) or []:
+            if c.get("api") == "NtSetInformationFile":
+                cls = str(_args(c).get("FileInformationClass", ""))
+                key = ("__setinfo_delete" if cls == SETINFO_DELETE
+                       else "__setinfo_rename" if cls == SETINFO_RENAME else None)
+                if key:
+                    api_count[key] += 1
+                    if key not in api_first:
+                        api_first[key] = (_parse_ts(c.get("timestamp")) or run_start, idx2)
+            idx2 += 1
     for token, (apis, minimum) in API_RULES.items():
+        apis = tuple(apis)
+        if token == "FILE_DELETE":
+            apis = apis + ("__setinfo_delete",)
+        elif token == "FILE_RENAME":
+            apis = apis + ("__setinfo_rename",)
         total = sum(api_count.get(a, 0) for a in apis)
         if total >= minimum:
             firsts = [api_first[a] for a in apis if a in api_first]

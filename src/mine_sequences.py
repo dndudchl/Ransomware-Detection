@@ -68,6 +68,18 @@ def load_sequences(path):
     return seqs
 
 
+def load_verdicts(paths):
+    """task_id -> verdict from one or more analyze_result.py CSVs."""
+    v = {}
+    for p in paths:
+        with open(os.path.expanduser(p), newline="") as f:
+            for r in csv.DictReader(f):
+                tid = r.get("task_id") or r.get("task")
+                if tid:
+                    v[str(tid)] = r.get("verdict", "")
+    return v
+
+
 # --------------------------------------------------------- PrefixSpan
 
 def prefixspan(sequences, min_count, max_len):
@@ -155,12 +167,23 @@ def main():
     ap.add_argument("--min-contrast", type=float, default=0.30,
                     help="keep patterns whose positive minus negative "
                          "support is at least this")
+    ap.add_argument("--positive-verdicts", nargs="*",
+                    help="analyze_result.py CSVs for the positive archives; "
+                         "when given, only runs whose verdict is "
+                         "--keep-verdict count as positives")
+    ap.add_argument("--keep-verdict", default="TRUE_ENCRYPTION")
     ap.add_argument("--out", required=True)
     ap.add_argument("--features",
                     help="also write a per-sample 0/1 matrix here")
     args = ap.parse_args()
 
     pos = load_sequences(args.positive)
+    if args.positive_verdicts:
+        v = load_verdicts(args.positive_verdicts)
+        before = len(pos)
+        pos = {t: s for t, s in pos.items() if v.get(t) == args.keep_verdict}
+        print(f"positive: {before} sequences, {len(pos)} with verdict "
+              f"{args.keep_verdict} kept")
     pos_seqs = list(pos.values())
     neg = {}
     for path in args.negative:

@@ -53,7 +53,9 @@ import csv
 import glob
 import gzip
 import json
+import time
 import argparse
+from concurrent.futures import ProcessPoolExecutor
 from collections import defaultdict, Counter
 
 # ------------------------------------------------------------- helpers
@@ -436,29 +438,55 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--show", action="store_true",
                     help="Print each sequence instead of writing a file")
+    ap.add_argument("--workers", type=int, default=os.cpu_count() or 4,
+                    help="Parsing is the whole cost and each report is "
+                         "independent, so this scales almost linearly")
+    ap.add_argument("--every", type=int, default=200,
+                    help="Report progress every N reports")
     args = ap.parse_args()
 
+    label = os.path.basename(os.path.normpath(os.path.expanduser(args.archives)))
     files = sorted(glob.glob(os.path.join(
         os.path.expanduser(args.archives), "*.json*")))
-    print(f"{len(files)} reports")
+    print(f"[{label}] {len(files)} reports, {args.workers} workers", flush=True)
 
-    rows = [process_one(p) for p in files]
-    ok = [r for r in rows if "error" not in r]
+    out_f = open(os.path.expanduser(args.out), "w") if args.out else None
+    t0 = time.time()
+    rows, failed = [], 0
+    with ProcessPoolExecutor(args.workers) as ex:
+        for i, r in enumerate(ex.map(process_one, files, chunksize=4), 1):
+            if "error" in r:
+                failed += 1
+            else:
+                rows.append(r)
+                if out_f:
+                    out_f.write(json.dumps(r) + "\n")
+            if i % args.every == 0 or i == len(files):
+                el = time.time() - t0
+                left = (len(files) - i) / (i / el) if el and i else 0
+                print(f"[{label}] {i}/{len(files)}  {el/60:.1f} min in, "
+                      f"{left/60:.1f} min left, {failed} failed", flush=True)
+    if out_f:
+        out_f.close()
 
+    ok = rows
     if args.show or not args.out:
         for r in ok:
             print(f"  {r['task_id']:<10} {' -> '.join(r['sequence'])}")
-        # vocabulary frequency
-        vocab = Counter(t for r in ok for t in r["sequence"])
-        print("\nbehaviour frequency across these reports:")
-        for t, n in vocab.most_common():
-            print(f"   {t:<20}{n:>4} / {len(ok)}  ({n/len(ok):.0%})")
+
+    # The vocabulary frequency is the check that matters: a token that never
+    # fires is a detection rule that does not work on this data.
+    vocab = Counter(t for r in ok for t in r["sequence"])
+    print(f"\n[{label}] behaviour frequency ({len(ok)} sequences):")
+    for t, n in vocab.most_common():
+        print(f"   {t:<20}{n:>5} / {len(ok)}  ({n/max(1,len(ok)):.0%})")
+    empty = sum(1 for r in ok if not r["sequence"])
+    if empty:
+        print(f"   ({empty} reports produced no behaviour at all)")
 
     if args.out:
-        with open(os.path.expanduser(args.out), "w") as f:
-            for r in ok:
-                f.write(json.dumps(r) + "\n")
-        print(f"[saved] {args.out}  ({len(ok)} sequences)")
+        print(f"[saved] {args.out}  ({len(ok)} sequences, "
+              f"{time.time()-t0:.0f}s)\n", flush=True)
 
 
 if __name__ == "__main__":

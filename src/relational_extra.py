@@ -51,16 +51,17 @@ CAPE's report.json:
   behavior.processes[]        process_id, parent_id, process_name,
                               first_seen, calls[]
   behavior.processes[].calls  api, timestamp, thread_id, arguments
-                              (NtReadFile/NtWriteFile carry Length and a
-                              FileHandle; NtCreateFile maps handle to path)
+                              (NtReadFile/NtWriteFile carry Length and
+                              HandleName, which is the path -- so no
+                              handle-to-path map is needed)
   behavior.enhanced[]         object=file, event=read/write/delete,
                               data.file, timestamp
 
-Handles are per-process, so the handle-to-path map is rebuilt for each
-process. NtWriteFile does not carry the path, only the handle, so per-file
-byte accounting depends on catching the NtCreateFile/NtOpenFile that
-produced the handle. Where that fails the byte lands in an "unpaired" bucket
-and is reported as a coverage figure, not silently dropped.
+Reads and writes are paired on the path with one extension removed, so that
+a file read as doc.docx and written as doc.docx.locked count as the same
+file. That is what ransomware does, and it is what the grid does, and it is
+what an archiver writing doc.docx.7z beside the original does; pairing on
+the exact path would miss all three.
 
 Usage
 -----
@@ -136,11 +137,35 @@ SHELLS = {"cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe",
           "vssadmin.exe", "bcdedit.exe", "wbadmin.exe", "taskkill.exe",
           "icacls.exe", "takeown.exe", "attrib.exe", "reg.exe"}
 
-INSTALLER_HOSTS = {"msiexec.exe", "dllhost.exe", "setup.exe",
+INSTALLER_HOSTS = {"msiexec.exe", "setup.exe",
                    "vcredist_x64.exe", "vcredist_x86.exe"}
+# dllhost.exe was here and has been taken out. It is the COM surrogate, and
+# ransomware launches it for elevation far more often than installers do --
+# on 1,134 encrypting runs the feature read 1.0, which is the opposite of
+# what its name promises. A feature whose name misleads the reader of the
+# ablation table is worse than no feature.
 
 
 # ------------------------------------------------ 1. per-file byte ratio
+
+def _stem(path):
+    """
+    A path with one trailing extension removed, so that a file read as
+    doc.docx and written as doc.docx.locked pair up.
+
+    Ransomware appends; so does the grid; so does 7-Zip writing doc.docx.7z
+    beside the original. Pairing on the exact path would miss every one of
+    those, which is most of what the ratio exists to see. Removing one
+    extension is enough for append-style renames and does no harm to files
+    written back under their own name.
+    """
+    p = path.lower()
+    i = p.rfind(".")
+    j = p.rfind("\\")
+    if i > j >= 0 or (i > 0 and j < 0):
+        return p[:i]
+    return p
+
 
 def per_file_byte_features(behavior):
     """
@@ -160,44 +185,52 @@ def per_file_byte_features(behavior):
     than forced into the ratio, because "written without ever being read" is
     itself the signature of an installer.
 
-    Handles are per-process; the map from handle to path is rebuilt each
-    time a process is entered. NtWriteFile does not carry the path.
+    CAPE attaches HandleName to NtReadFile and NtWriteFile directly, so no
+    handle-to-path map is needed. Reads and writes are paired on the stem
+    (one extension removed) so that append-style renames still match.
     """
+    # Reads are keyed on their exact path. A write is credited to the read
+    # path it names exactly, or -- failing that -- to the read path it names
+    # once one trailing extension is removed. That covers doc.docx read and
+    # doc.docx.locked written, without stripping the read side (which would
+    # turn doc.docx into doc and match nothing).
     read_by_path = Counter()
-    write_by_path = Counter()
+    write_raw = Counter()
     unpaired_read = unpaired_write = 0
 
     for process in behavior.get("processes", []) or []:
-        handle_to_path = {}
         for call in process.get("calls", []) or []:
             api = call.get("api", "")
+            if api not in ("NtReadFile", "NtWriteFile", "ReadFile", "WriteFile"):
+                continue
             args = _args(call)
-            if api in ("NtCreateFile", "NtOpenFile"):
-                h = args.get("FileHandle") or args.get("Handle")
-                p = args.get("FileName") or args.get("ObjectAttributes")
-                if h and p:
-                    handle_to_path[str(h)] = str(p)
-            elif api in ("NtReadFile", "NtWriteFile", "ReadFile", "WriteFile"):
-                n = _int(args.get("Length") or args.get("length")
-                         or args.get("Buffer_Length"))
-                if n is None or n <= 0 or n > (1 << 30):
-                    continue
-                h = args.get("FileHandle") or args.get("hFile") or args.get("Handle")
-                path = handle_to_path.get(str(h)) if h else None
-                if api in ("NtReadFile", "ReadFile"):
-                    if path:
-                        read_by_path[path] += n
-                    else:
-                        unpaired_read += n
+            n = _int(args.get("Length") or args.get("length")
+                     or args.get("Buffer_Length"))
+            if n is None or n <= 0 or n > (1 << 30):
+                continue
+            path = args.get("HandleName") or args.get("FileName") or ""
+            # Console, pipes and devices are not files the program worked on.
+            if not path or path.startswith("\\Device\\") or path.startswith("\\\\.\\"):
+                path = ""
+            path = path.lower() if path else ""
+            if api in ("NtReadFile", "ReadFile"):
+                if path:
+                    read_by_path[path] += n
                 else:
-                    if path:
-                        write_by_path[path] += n
-                    else:
-                        unpaired_write += n
-            elif api in ("NtClose", "CloseHandle"):
-                h = args.get("Handle") or args.get("hObject")
-                if h:
-                    handle_to_path.pop(str(h), None)
+                    unpaired_read += n
+            else:
+                if path:
+                    write_raw[path] += n
+                else:
+                    unpaired_write += n
+
+    write_by_path = Counter()
+    for wp, n in write_raw.items():
+        if wp in read_by_path:
+            write_by_path[wp] += n
+        else:
+            s = _stem(wp)
+            write_by_path[s if s in read_by_path else wp] += n
 
     both = set(read_by_path) & set(write_by_path)
     ratios = [write_by_path[p] / read_by_path[p] for p in both
@@ -406,19 +439,64 @@ def extra_features(report):
 
 
 EXTRA_GROUPS = {
-    # For train_model.py GROUPS: which group each new column belongs to.
-    "relation": ["pf_ratio_median", "pf_ratio_iqr", "pf_ratio_near_one",
-                 "pf_write_only_share", "pf_read_only_share",
-                 "proc_write_concentration", "proc_write_thread_share_top",
-                 "ph_reads_before_first_write"],
-    "sequence": ["ph_first_write_pos", "ph_write_span_share",
-                 "ph_write_half_pos", "ph_write_concentration_q"],
-    "volume":   ["pf_n_files_both", "proc_n", "proc_tree_depth",
-                 "proc_write_thread_n"],
-    "indicator": ["proc_shell_child_share", "proc_self_spawn",
-                  "proc_installer_host"],
-    # Coverage diagnostics; not model input.
+    # Which group each new column belongs to, for train_model.py GROUPS.
+    #
+    # This list is shorter than what the module computes. Every feature here
+    # was measured on 1,134 encrypting runs against the real signed software
+    # that actually did file work -- not against the whole hard negative set,
+    # because most of that set is Sysinternals tools that read and write
+    # nothing, and separating ransomware from those is the trap this study
+    # started with. Seven features did not survive that comparison and are
+    # listed under _measured_and_dropped with the reason.
+    "relation": [
+        # The anchor: bytes out against bytes in, computed inside each file
+        # and then summarised. 1.02 for ransomware, 0.68 for active real
+        # software. Independent of how many files were touched, which is the
+        # property the volume-shift experiment showed matters.
+        "pf_ratio_median", "pf_ratio_near_one",
+        # Files written without ever being read, and read without being
+        # written: the two ways a program can touch a file without the
+        # read-write relation ransomware has.
+        "pf_write_only_share", "pf_read_only_share",
+        # How concentrated the writing was in one thread. 0.49 against 0.90:
+        # ransomware spreads encryption across a pool, ordinary software
+        # writes from one thread.
+        "proc_write_thread_share_top",
+    ],
+    "sequence": [
+        # Where in the run the writing fell. Weakest of the three families
+        # against active real software; kept because it is the only thing
+        # here that describes position in time rather than proportion.
+        "ph_first_write_pos", "ph_write_span_share",
+        "ph_write_concentration_q",
+    ],
+    "volume": [
+        "proc_tree_depth", "proc_write_thread_n",
+    ],
+    "indicator": [
+        # Children that are shells or system utilities: 0.25 against 0.00.
+        "proc_shell_child_share", "proc_installer_host",
+    ],
+    # Computed and reported, but not model input.
     "_diagnostic": ["pf_byte_paired_share"],
+    # Computed, measured, and left out. Kept in the code so the measurement
+    # can be repeated when the installer batch lands and the active real
+    # software set grows past a few dozen.
+    "_measured_and_dropped": [
+        "pf_n_files_both",            # 0.872, but duplicates n_read_write_pairs,
+                                      # which is already the top feature by
+                                      # AUC-lost; two columns measuring one
+                                      # thing split its importance in half
+        "proc_n",                     # 0.789, but a plain count of processes,
+                                      # so it stands in for activity
+        "pf_ratio_iqr",               # present on 17% of active real software
+        "proc_self_spawn",            # 0.586, median 0 on both sides
+        "proc_write_concentration",   # 0.476
+        "ph_write_half_pos",          # 0.487 here, 0.709 on the grid: it reads
+                                      # the shape of the constructed variants
+                                      # rather than anything about ransomware
+        "ph_reads_before_first_write",  # 0.455, median 0 on both sides
+    ],
 }
 
 

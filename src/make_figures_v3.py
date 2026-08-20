@@ -201,7 +201,7 @@ CUT_LINES = [
 # Evenly spaced, and stopping at 500 because the number of programs other
 # people wrote falls from 51 at the 300 cut to 24 at 800, too few to break
 # the rate down by who wrote the sample.
-CUT_VALUES = (150, 200, 300, 500, 800)
+CUT_VALUES = (100, 200, 300, 400, 500)
 
 
 def load_cuts(pattern, cuts=CUT_VALUES):
@@ -242,12 +242,16 @@ def fig_cut_sweep(cuts, outdir):
     # sequence and order are both kept because the gap between them is the
     # second point the figure makes: API-level order and behaviour-level
     # order are not the same claim.
+    # relation and the combined set coincide exactly at the two highest cuts
+    # (1/816 and 2/574), so a solid line for each would hide one of them.
+    # relation is dashed and drawn last; where the two agree the black shows
+    # through the gaps.
     styles = {
         "volume": (ACCENT, "-o", 2.2),
         "sequence": (MID, "--v", 1.3),
         "order": (ACCENT3, "-^", 1.5),
-        "relation": (ACCENT2, "-o", 1.8),
-        "behaviour + relation + order": (INK, "-s", 1.5),
+        "behaviour + relation + order": (INK, "-s", 1.8),
+        "relation": (ACCENT2, "--o", 1.6),
     }
     # A rate of exactly zero cannot be placed on a log axis, and matplotlib
     # draws the segment running off the bottom of the plot rather than
@@ -325,13 +329,10 @@ def fig_order_coverage(behaviour_path, modelling_path, names_path, outdir):
                         textcoords="offset points", fontsize=8, color=INK)
 
     n_live = sum(1 for p in pts if p[0] >= 0.10)
+    print(f"    [fig4] {len(pts)} pairs, {n_live} measurable in both classes")
     ax.set_xlabel("share of benign software where the pair is measurable")
     ax.set_ylabel("share of ransomware where the pair is measurable")
     ax.set_xlim(-0.01, lim); ax.set_ylim(0, lim)
-    ax.annotate(f"{len(pts)} pairs frequent in ransomware\n"
-                f"{n_live} measurable in 10% or more of benign software",
-                xy=(0.97, 0.06), xycoords="axes fraction", ha="right",
-                fontsize=8.5, color=MID)
     out = os.path.join(outdir, "fig4_order_coverage.png")
     fig.savefig(out); plt.close(fig)
     return out

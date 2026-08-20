@@ -202,7 +202,10 @@ CUT_LINES = [
     ("relation", "relation alone"),
     ("behaviour + relation + order", "A+S1+S2"),
 ]
-CUT_VALUES = (150, 200, 300, 500, 800)
+# Evenly spaced, and stopping at 500 because the number of programs other
+# people wrote falls from 51 at the 300 cut to 24 at 800, too few to break
+# the rate down by who wrote the sample.
+CUT_VALUES = (100, 200, 300, 400, 500)
 
 
 def load_cuts(pattern, cuts=CUT_VALUES):
@@ -370,20 +373,27 @@ def fig_tradeoff(points, outdir):
     ax.scatter(xs, ys, s=60, color=ACCENT, zorder=2)
     # Labels alternate above and below so the two points 0.002 apart on the
     # x axis do not collide.
-    # Placement is per label rather than alternating: the two A_generic
-    # points are 0.007 apart on x and 0.023 on y, so a rule that does not
-    # know which is which puts one on top of the other.
-    below = {"A_generic + relation + order", "A + relation"}
+    # Placement is per label. The two A_generic points sit 0.007 apart on x
+    # and the two A points 0.002 apart, so anything positional-by-rule puts
+    # one label through the other; the long labels go left of their point
+    # and the short ones right.
+    PLACE = {
+        "A": ("left", -10, 0),
+        "A + relation": ("left", -10, -4),
+        "A + relation + order": ("right", 10, 4),
+        "A_generic": ("right", 10, 0),
+        "A_generic + relation + order": ("right", 10, 6),
+    }
     for label, x, y in points:
-        dy = -15 if label in below else 11
-        ax.annotate(label, xy=(x, y), xytext=(0, dy), ha="center",
+        ha, dx, dy = PLACE.get(label, ("left", -10, 0))
+        ax.annotate(label, xy=(x, y), xytext=(dx, dy), ha=ha, va="center",
                     textcoords="offset points", fontsize=8.5)
     ax.set_xlabel("false positives on software others wrote (n = 1,034)")
     ax.set_ylabel("recall on ransomware that never encrypted (n = 722)")
     # From zero on the false positive axis. The five points span 0.048 to
     # 0.086, and a zoomed axis makes a difference of forty programs in a
     # thousand look like a cliff.
-    ax.set_xlim(0, max(xs) * 1.30)
+    ax.set_xlim(0, max(xs) * 1.45)
     ax.set_ylim(min(ys) - 0.07, max(ys) + 0.07)
     ax.set_title("Catching atypical ransomware costs false positives",
                  loc="left", fontsize=10.5, pad=10)

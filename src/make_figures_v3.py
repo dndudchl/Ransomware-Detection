@@ -341,12 +341,15 @@ def fig_order_coverage(behaviour_path, modelling_path, names_path, outdir):
 # ----------------------------------------------------------------- figure 5
 
 # label, false positives on real software, recall on non-encrypting ransomware
+# Reader-facing names. A, A_generic and the S1/S2 shorthand are internal
+# labels and appear nowhere in the paper, so a legend using them would be
+# unreadable.
 TRADE = [
-    ("A", .0484, .546),
-    ("A + relation", .0706, .613),
-    ("A + relation + order", .0725, .619),
-    ("A_generic", .0861, .742),
-    ("A_generic + relation + order", .0793, .765),
+    ("behaviour", .0484, .546),
+    ("behaviour + relation", .0706, .613),
+    ("behaviour + relation + order", .0725, .619),
+    ("domain-free", .0861, .742),
+    ("domain-free + relation + order", .0793, .765),
 ]
 
 

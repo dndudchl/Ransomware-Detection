@@ -97,6 +97,27 @@ The 200-column API transition matrix remains in the CSV but in no group.
 **A rate quoted without its condition is meaningless here.** The same model
 scores 0.003, 0.011 and 0.373 depending on which row applies.
 
+### The measurement protocol, fixed
+
+Every rate in this document is computed the same way, because two defensible
+definitions were in use earlier and they disagreed by a third at some cuts:
+
+1. each fold writes the predicted probability for every held-out negative it
+   scored, per feature group, to a per-sample file;
+2. a program counts as flagged when that probability reaches 0.5;
+3. the denominator is every negative measured under the condition, not a
+   subset of it;
+4. the same figure is always also reported split by who wrote the negative —
+   software other people wrote against samples constructed here — because
+   the pooled rate can move in the opposite direction to both of its parts
+   (see B3);
+5. two feature sets are compared by McNemar on the programs they disagree
+   about, never by the difference of two rates.
+
+"Negative" below never means "benign". At the 300-file cut, for instance,
+961 negatives were measured and only 51 of them are software someone else
+wrote.
+
 Negative cross-validation exists because a fixed 20% split measures about 210
 negatives, so a rate of 0.005 rests on one flagged program and cannot be
 distinguished from 0.010. Five rotations score every negative exactly once,
@@ -224,8 +245,8 @@ ransomware, exactly **one** is measurable in 10% or more of active benign:
 |---|---|---|
 | WALLPAPER_SET → REGISTRY_WRITE | 28% | **16%** |
 | DIR_ENUMERATE → FILE_RENAME | 87% | 1% |
-| DIR_ENUMERATE → FILE_ENCRYPT | 84% | 4% |
-| FILE_ENCRYPT → RANSOM_NOTE | 73% | 0% |
+| DIR_ENUMERATE → FILE_REWRITE | 84% | 4% |
+| FILE_REWRITE → MULTI_DIR_DOCUMENT | 73% | 0% |
 | (82 others) | 10–74% | ≤ 9% |
 
 Ordinary software does not perform the behaviour *combinations* ransomware
@@ -283,18 +304,18 @@ domain-knowledge features.
 
 ## B1. The volume-shift result does not depend on the cut
 
-| cut | train / measure | static | volume | relation | order | A | A+S1 |
-|---|---|---|---|---|---|---|---|
-| 150 | 1,649 / 2,891 | 0.008 | 0.280 | 0.168 | 0.044 | 0.056 | 0.062 |
-| 200 | 1,809 / 2,731 | 0.006 | 0.271 | 0.113 | 0.042 | 0.042 | 0.036 |
-| 300 | 2,208 / 2,332 | 0.004 | 0.300 | 0.034 | 0.018 | 0.046 | 0.006 |
-| 500 | 2,710 / 1,830 | 0.003 | 0.179 | 0.003 | 0.011 | 0.011 | 0.003 |
-| 800 | 3,196 / 1,344 | 0.004 | 0.154 | 0.002 | 0.011 | 0.005 | 0.007 |
+| cut | negatives measured | static | volume | sequence | relation | order | A | A + relation |
+|---|---|---|---|---|---|---|---|---|
+| 150 | 1,289 | 0.0085 | 0.2878 | 0.0295 | 0.1683 | 0.0419 | 0.0574 | 0.0551 |
+| 200 | 1,210 | 0.0058 | 0.2702 | 0.0165 | 0.1140 | 0.0438 | 0.0430 | 0.0380 |
+| 300 | 961 | 0.0031 | **0.3111** | 0.0208 | 0.0302 | 0.0146 | 0.0447 | **0.0062** |
+| 500 | 816 | 0.0025 | 0.2010 | 0.0233 | 0.0012 | 0.0110 | 0.0110 | 0.0025 |
+| 800 | 574 | 0.0035 | 0.1376 | 0.0209 | 0.0035 | 0.0105 | 0.0035 | 0.0052 |
 
-The cut-300 column reads 0.300 here and 0.311 in R2 because this table takes
-the rate the ablation prints over the negatives it counts as benign, while
-R2 recomputes it per sample over all 961 measured negatives. Same run, two
-denominators; the thesis should quote one of them throughout.
+All five rows are computed under the protocol in Part I, so the cut-300
+column matches R2 exactly. An earlier version of this table read the rate
+the ablation prints over a narrower denominator and disagreed with R2 by up
+to a third at the higher cuts; those numbers have been replaced.
 
 **Volume never recovers.** Every other group improves by an order of
 magnitude or more as the cut rises and the training set grows; volume
@@ -373,9 +394,16 @@ positive definition and the activity band. The consistent reading is that
 relation sharpens the boundary where the classes are hard to separate by
 volume, and loosens it where the positive class itself has been loosened.
 
-**What the anchor becomes.** Relations between events rather than individual
-events — held, and narrowed from "A then B" to "events on the same target".
-R3 is why the narrowing is forced rather than chosen.
+**What the anchor becomes.** The research question was that ransomware shows
+a semantic correlation between events rather than a signature in individual
+events. That holds. What narrows is the form the correlation takes: from
+"A is followed by B" to "two events fall on the same target". R3 is why the
+narrowing is forced rather than chosen — the ordering form cannot be
+measured on this problem, and the same-target form can, and does (R2).
+
+This is a narrowing of the variable slot, not a change of anchor. The
+approach the thesis argues for — features whose unit is a relation between
+events rather than a single event — is unchanged.
 
 **What this says about the field's reporting.** A detector's false positive
 rate is reported as a property of the detector. R1 shows it is at least as
@@ -403,11 +431,22 @@ Reported as tables without discussion:
   records nothing for them (SHEmptyRecycleBin, CreateService,
   GetLogicalDrives, WNetOpenEnum, self-delete via cmd, NtDelayExecution)
 
-**Two token names must change in the thesis.** `FILE_ENCRYPT` detects 20 or
-more files read and written under the same stem — no entropy, no crypto call,
-and 30% of active benign software triggers it. `RANSOM_NOTE` detects one file
-name written into five or more directories, with no string matching. Naming
-them same-file-rewrite and multi-directory-document avoids a circular claim.
+**Two tokens are renamed in the thesis, code unchanged.** `FILE_ENCRYPT`
+detects 20 or more files read and then written under the same stem — no
+entropy is measured, no crypto call is required, and 30% of active benign
+software triggers it. `RANSOM_NOTE` detects one file name written into five
+or more directories, with no string matching at all. Both original names
+assert the conclusion, so the thesis calls them:
+
+| code | thesis | what is actually detected |
+|---|---|---|
+| FILE_ENCRYPT | FILE_REWRITE | ≥ 20 files read and written under the same stem |
+| RANSOM_NOTE | MULTI_DIR_DOCUMENT | one document name written into ≥ 5 directories |
+
+The column names in the released data keep the original spelling, and this
+mapping is given in the appendix so the two can be reconciled. The order
+features inherit the change: `ord_enc_note` is FILE_REWRITE before
+MULTI_DIR_DOCUMENT.
 
 ---
 

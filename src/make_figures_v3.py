@@ -108,7 +108,7 @@ def fig_saturation(points, outdir):
     ax.plot(xs, rates, "-o", color=ACCENT, lw=1.6, ms=6)
 
     for (x, k, n, h), r in zip(points, rates):
-        ax.annotate(f"{r:.3f}\n{h} of {n:,}", xy=(x, r), xytext=(7, 9),
+        ax.annotate(f"{r:.3f}\n{h:,} of {n:,}", xy=(x, r), xytext=(7, 9),
                     textcoords="offset points", fontsize=7.5, color=INK)
 
     ax.set_xlabel("active negatives in training")
@@ -144,30 +144,40 @@ def fig_volume_shift(scores_path, modelling_path, outdir):
                 if r.get(col) not in (None, "") and float(r[col]) >= 0.5)
         return h, len(sel)
 
-    fig, ax = plt.subplots(figsize=(7.0, 3.8))
+    fig, ax = plt.subplots(figsize=(7.4, 4.2))
     y = range(len(groups))
     h = 0.36
-    real, cons = [], []
+    real, cons, counts = [], [], []
     for col, _ in groups:
         hr, nr = rate(col, "benign_active")
         hc, nc = rate(col, "constructed")
         real.append(hr / nr if nr else 0)
         cons.append(hc / nc if nc else 0)
+        counts.append((hr, nr, hc, nc))
 
+    nr0, nc0 = counts[0][1], counts[0][3]
     ax.barh([i + h/2 for i in y], real, height=h, color=ACCENT,
-            label=f"software others wrote (n={rate(groups[0][0],'benign_active')[1]})")
+            label=f"software others wrote (n={nr0})")
     ax.barh([i - h/2 for i in y], cons, height=h, color=LIGHT,
-            label=f"our constructed samples (n={rate(groups[0][0],'constructed')[1]})")
+            label=f"our constructed samples (n={nc0:,})")
 
     ax.set_yticks(list(y))
     ax.set_yticklabels([lbl for _, lbl in groups], fontsize=9)
     ax.invert_yaxis()
     ax.set_xlabel("false positive rate")
-    ax.set_xlim(0, max(max(real), max(cons)) * 1.22)
-    for i, (a, b) in enumerate(zip(real, cons)):
-        ax.text(a + 0.006, i + h/2, f"{a:.3f}", va="center", fontsize=7.5)
-        ax.text(b + 0.006, i - h/2, f"{b:.3f}", va="center", fontsize=7.5,
-                color=MID)
+    ax.set_xlim(0, max(max(real), max(cons)) * 1.34)
+    # Counts, not only rates: 0.059 of 51 is three programs and 0.029 of 910
+    # is twenty-six, and the bars alone give those equal visual weight.
+    for i, ((hr, nr, hc, nc), a, b) in enumerate(zip(counts, real, cons)):
+        ax.text(a + 0.007, i + h/2, f"{a:.3f}   {hr}/{nr}",
+                va="center", fontsize=7.5)
+        ax.text(b + 0.007, i - h/2, f"{b:.3f}   {hc}/{nc:,}",
+                va="center", fontsize=7.5, color=MID)
+    # The point of the figure is that volume is in a different régime, so it
+    # is marked rather than left for the reader to find.
+    for i, (_, lbl) in enumerate(groups):
+        if lbl == "volume":
+            ax.axhspan(i - 0.5, i + 0.5, color=ACCENT, alpha=0.06, zorder=0)
     ax.legend(loc="lower right", frameon=False, fontsize=8)
     ax.set_title("Trained below 300 files, measured at 300 and above",
                  loc="left", fontsize=10.5, pad=10)
@@ -305,18 +315,32 @@ TRADE = [
 
 
 def fig_tradeoff(points, outdir):
-    fig, ax = plt.subplots(figsize=(6.0, 4.2))
+    fig, ax = plt.subplots(figsize=(6.4, 4.4))
     xs = [p[1] for p in points]
     ys = [p[2] for p in points]
-    ax.plot(xs, ys, "-", color=LIGHT, lw=1, zorder=1)
+    # No connecting line: the five feature sets are not a path anyone walks,
+    # and drawing one in list order produced a zigzag that implied a
+    # trajectory. The frontier is what matters, so only that is drawn.
+    front, best = [], -1
+    for label, x, y in sorted(points, key=lambda t: t[1]):
+        if y > best:
+            front.append((x, y)); best = y
+    ax.plot([p[0] for p in front], [p[1] for p in front], "-",
+            color=LIGHT, lw=1.2, zorder=1)
     ax.scatter(xs, ys, s=60, color=ACCENT, zorder=2)
-    for label, x, y in points:
-        ax.annotate(label, xy=(x, y), xytext=(8, -3),
+    # Labels alternate above and below so the two points 0.002 apart on the
+    # x axis do not collide.
+    for i, (label, x, y) in enumerate(sorted(points, key=lambda t: t[1])):
+        dy = 11 if i % 2 == 0 else -15
+        ax.annotate(label, xy=(x, y), xytext=(0, dy), ha="center",
                     textcoords="offset points", fontsize=8.5)
     ax.set_xlabel("false positives on software others wrote (n = 1,034)")
     ax.set_ylabel("recall on ransomware that never encrypted (n = 722)")
-    ax.set_xlim(min(xs) * 0.85, max(xs) * 1.30)
-    ax.set_ylim(min(ys) - 0.04, max(ys) + 0.05)
+    # From zero on the false positive axis. The five points span 0.048 to
+    # 0.086, and a zoomed axis makes a difference of forty programs in a
+    # thousand look like a cliff.
+    ax.set_xlim(0, max(xs) * 1.30)
+    ax.set_ylim(min(ys) - 0.07, max(ys) + 0.07)
     ax.set_title("Catching atypical ransomware costs false positives",
                  loc="left", fontsize=10.5, pad=10)
     out = os.path.join(outdir, "fig5_tradeoff.png")

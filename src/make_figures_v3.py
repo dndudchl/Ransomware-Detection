@@ -114,8 +114,6 @@ def fig_saturation(points, outdir):
     ax.set_xlabel("active negatives in training")
     ax.set_ylabel("false positives, held-out negatives\n(lower is better)")
     ax.set_ylim(-0.04, max(his) * 1.18)
-    ax.set_title("The rate is a property of the negative set, not the model",
-                 loc="left", fontsize=10.5, pad=10)
     ax.annotate("feature set unchanged throughout", xy=(0.98, 0.92),
                 xycoords="axes fraction", ha="right", fontsize=8, color=MID)
     out = os.path.join(outdir, "fig1_saturation.png")
@@ -178,15 +176,13 @@ def fig_volume_shift(scores_path, modelling_path, outdir):
         ax.text(a + 0.007, i + h/2, f"{a:.3f}   {hr}/{nr}",
                 va="center", fontsize=7.5)
         ax.text(b + 0.007, i - h/2, f"{b:.3f}   {hc}/{nc:,}",
-                va="center", fontsize=7.5, color=MID)
+                va="center", fontsize=7.5, color=INK)
     # The point of the figure is that volume is in a different régime, so it
     # is marked rather than left for the reader to find.
     for i, (_, lbl) in enumerate(groups):
         if lbl == "volume":
             ax.axhspan(i - 0.5, i + 0.5, color=ACCENT, alpha=0.06, zorder=0)
     ax.legend(loc="lower right", frameon=False, fontsize=8)
-    ax.set_title("Trained below 300 files, measured at 300 and above",
-                 loc="left", fontsize=10.5, pad=10)
     out = os.path.join(outdir, "fig2_volume_shift.png")
     fig.savefig(out); plt.close(fig)
     return out
@@ -280,8 +276,6 @@ def fig_cut_sweep(cuts, outdir):
     ax.set_xlim(-0.25, len(cuts) - 0.75)
     ax.legend(frameon=False, fontsize=8, ncol=3, loc="upper center",
               bbox_to_anchor=(0.5, -0.20))
-    ax.set_title("Volume stays where it is at every cut", loc="left",
-                 fontsize=10.5, pad=10)
     out = os.path.join(outdir, "fig3_cut_sweep.png")
     fig.savefig(out); plt.close(fig)
     return out
@@ -316,7 +310,7 @@ def fig_order_coverage(behaviour_path, modelling_path, names_path, outdir):
     if not pts:
         return None
 
-    fig, ax = plt.subplots(figsize=(6.2, 5.0))
+    fig, ax = plt.subplots(figsize=(6.2, 4.2))
     lim = max(max(p[0] for p in pts), max(p[1] for p in pts)) * 1.08
     ax.plot([0, lim], [0, lim], color=LIGHT, lw=1)
     ax.axvline(0.10, color=MID, lw=0.8, ls=":")
@@ -334,8 +328,6 @@ def fig_order_coverage(behaviour_path, modelling_path, names_path, outdir):
     ax.set_xlabel("share of benign software where the pair is measurable")
     ax.set_ylabel("share of ransomware where the pair is measurable")
     ax.set_xlim(-0.01, lim); ax.set_ylim(0, lim)
-    ax.set_title("An order can only be asked about where both behaviours occur",
-                 loc="left", fontsize=10.5, pad=10)
     ax.annotate(f"{len(pts)} pairs frequent in ransomware\n"
                 f"{n_live} measurable in 10% or more of benign software",
                 xy=(0.97, 0.06), xycoords="axes fraction", ha="right",
@@ -358,7 +350,7 @@ TRADE = [
 
 
 def fig_tradeoff(points, outdir):
-    fig, ax = plt.subplots(figsize=(6.4, 4.4))
+    fig, ax = plt.subplots(figsize=(6.4, 3.6))
     xs = [p[1] for p in points]
     ys = [p[2] for p in points]
     # No connecting line: the five feature sets are not a path anyone walks,
@@ -395,8 +387,6 @@ def fig_tradeoff(points, outdir):
     # thousand look like a cliff.
     ax.set_xlim(0, max(xs) * 1.18)
     ax.set_ylim(min(ys) - 0.07, max(ys) + 0.07)
-    ax.set_title("Catching atypical ransomware costs false positives",
-                 loc="left", fontsize=10.5, pad=10)
     out = os.path.join(outdir, "fig5_tradeoff.png")
     fig.savefig(out); plt.close(fig)
     return out

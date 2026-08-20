@@ -201,7 +201,7 @@ CUT_LINES = [
 # Evenly spaced, and stopping at 500 because the number of programs other
 # people wrote falls from 51 at the 300 cut to 24 at 800, too few to break
 # the rate down by who wrote the sample.
-CUT_VALUES = (100, 200, 300, 400, 500)
+CUT_VALUES = (150, 200, 300, 500, 800)
 
 
 def load_cuts(pattern, cuts=CUT_VALUES):

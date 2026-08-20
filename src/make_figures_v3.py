@@ -112,7 +112,7 @@ def fig_saturation(points, outdir):
                     textcoords="offset points", fontsize=7.5, color=INK)
 
     ax.set_xlabel("active negatives in training")
-    ax.set_ylabel("false positives, held-out negatives")
+    ax.set_ylabel("false positives, held-out negatives\n(lower is better)")
     ax.set_ylim(-0.04, max(his) * 1.18)
     ax.set_title("The rate is a property of the negative set, not the model",
                  loc="left", fontsize=10.5, pad=10)
@@ -144,6 +144,12 @@ def fig_volume_shift(scores_path, modelling_path, outdir):
                 if r.get(col) not in (None, "") and float(r[col]) >= 0.5)
         return h, len(sel)
 
+    # Ordered by the rate on software other people wrote, because that is the
+    # column the thesis quotes. Sorting by the constructed column instead
+    # would put the groups in a different order from the text.
+    groups.sort(key=lambda g: -(rate(g[0], "benign_active")[0] /
+                                max(1, rate(g[0], "benign_active")[1])))
+
     fig, ax = plt.subplots(figsize=(7.4, 4.2))
     y = range(len(groups))
     h = 0.36
@@ -164,7 +170,7 @@ def fig_volume_shift(scores_path, modelling_path, outdir):
     ax.set_yticks(list(y))
     ax.set_yticklabels([lbl for _, lbl in groups], fontsize=9)
     ax.invert_yaxis()
-    ax.set_xlabel("false positive rate")
+    ax.set_xlabel("false positive rate (lower is better)")
     ax.set_xlim(0, max(max(real), max(cons)) * 1.34)
     # Counts, not only rates: 0.059 of 51 is three programs and 0.029 of 910
     # is twenty-six, and the bars alone give those equal visual weight.
@@ -188,24 +194,41 @@ def fig_volume_shift(scores_path, modelling_path, outdir):
 
 # ----------------------------------------------------------------- figure 3
 
-# cut -> measured n, then rate per group
-CUTS = [
-    (150, 1289, {"static": .0085, "volume": .2878, "sequence": .0295,
-                 "relation": .1683, "order": .0419, "behaviour": .0574,
-                 "behaviour + relation": .0551}),
-    (200, 1210, {"static": .0058, "volume": .2702, "sequence": .0165,
-                 "relation": .1140, "order": .0438, "behaviour": .0430,
-                 "behaviour + relation": .0380}),
-    (300, 961, {"static": .0031, "volume": .3111, "sequence": .0208,
-                "relation": .0302, "order": .0146, "behaviour": .0447,
-                "behaviour + relation": .0062}),
-    (500, 816, {"static": .0025, "volume": .2010, "sequence": .0233,
-                "relation": .0012, "order": .0110, "behaviour": .0110,
-                "behaviour + relation": .0025}),
-    (800, 574, {"static": .0035, "volume": .1376, "sequence": .0209,
-                "relation": .0035, "order": .0105, "behaviour": .0035,
-                "behaviour + relation": .0052}),
+# Which column in the score files backs each line in figure 3.
+CUT_LINES = [
+    ("volume", "volume alone"),
+    ("sequence", "sequence alone"),
+    ("order", "order: behav"),
+    ("relation", "relation alone"),
+    ("behaviour + relation + order", "A+S1+S2"),
 ]
+CUT_VALUES = (150, 200, 300, 500, 800)
+
+
+def load_cuts(pattern, cuts=CUT_VALUES):
+    """
+    Read each cut's rates straight from its per-sample score file, under the
+    protocol in Part I: flagged at 0.5, denominator every measured negative.
+    Reading rather than transcribing keeps this figure and the robustness
+    table from drifting apart, which they did once already.
+    """
+    out = []
+    for cut in cuts:
+        path = os.path.expanduser(pattern.format(cut=cut))
+        if not os.path.exists(path):
+            continue
+        rows = read(path)
+        if not rows:
+            continue
+        rates = {}
+        for label, col in CUT_LINES:
+            if col not in rows[0]:
+                continue
+            h = sum(1 for r in rows
+                    if r.get(col) not in (None, "") and float(r[col]) >= 0.5)
+            rates[label] = h / len(rows)
+        out.append((cut, len(rows), rates))
+    return out
 
 
 def fig_cut_sweep(cuts, outdir):
@@ -214,31 +237,48 @@ def fig_cut_sweep(cuts, outdir):
     # linear axis the first two collide while the last two leave a gap that
     # means nothing. What matters is the ordering, not the arithmetic.
     xs = list(range(len(cuts)))
+    # Five lines, not seven. Figure 2 already ranks all the groups at one
+    # cut; this figure asks only whether that ranking survives the choice of
+    # cut, and seven overlapping lines answered it less clearly than five.
+    # sequence and order are both kept because the gap between them is the
+    # second point the figure makes: API-level order and behaviour-level
+    # order are not the same claim.
     styles = {
-        "volume": (ACCENT, "-o", 2.0),
-        "relation": (ACCENT2, "-o", 1.6),
-        "order": (ACCENT3, "-^", 1.3),
-        "behaviour + relation": (INK, "-s", 1.3),
-        "behaviour": (MID, "--", 1.0),
-        "sequence": (LIGHT, "--", 1.0),
-        "static": (LIGHT, ":", 1.0),
+        "volume": (ACCENT, "-o", 2.2),
+        "sequence": (MID, "--v", 1.3),
+        "order": (ACCENT3, "-^", 1.5),
+        "relation": (ACCENT2, "-o", 1.8),
+        "behaviour + relation + order": (INK, "-s", 1.5),
     }
+    # A rate of exactly zero cannot be placed on a log axis, and matplotlib
+    # draws the segment running off the bottom of the plot rather than
+    # omitting it. Zeros are put on a floor below the smallest real value and
+    # marked hollow, so the reader can see that the point is "none observed"
+    # and not a measured rate.
+    seen = [v for c in cuts for v in c[2].values() if v]
+    floor = (min(seen) / 2.2) if seen else 1e-4
     for name, (colour, style, lw) in styles.items():
-        ys = [c[2].get(name) for c in cuts]
-        if any(v is None for v in ys):
+        raw = [c[2].get(name) for c in cuts]
+        if any(v is None for v in raw):
             continue
+        ys = [v if v else floor for v in raw]
         ax.plot(xs, ys, style, color=colour, lw=lw, ms=4, label=name)
+        for x, v, y in zip(xs, raw, ys):
+            if not v:
+                ax.plot(x, y, "o", ms=7, mfc="white", mec=colour, mew=1.4,
+                        zorder=5)
 
     ax.set_yscale("log")
+    ax.set_ylim(floor / 1.6, None)
     ax.set_xlabel("files opened: training below the cut, measurement at or above")
-    ax.set_ylabel("false positives (log scale)")
+    ax.set_ylabel("false positives, log scale (lower is better)")
     ax.set_xticks(xs)
     ax.set_xticklabels([f"{c[0]}\nn={c[1]:,}" for c in cuts], fontsize=8)
     ax.set_xlim(-0.25, len(cuts) - 0.75)
-    ax.legend(frameon=False, fontsize=8, ncol=4, loc="upper center",
+    ax.legend(frameon=False, fontsize=8, ncol=3, loc="upper center",
               bbox_to_anchor=(0.5, -0.20))
-    ax.set_title("Volume never recovers; every other group improves\n"
-                 "by an order of magnitude", loc="left", fontsize=10.5, pad=10)
+    ax.set_title("Volume stays where it is at every cut", loc="left",
+                 fontsize=10.5, pad=10)
     out = os.path.join(outdir, "fig3_cut_sweep.png")
     fig.savefig(out); plt.close(fig)
     return out
@@ -330,8 +370,12 @@ def fig_tradeoff(points, outdir):
     ax.scatter(xs, ys, s=60, color=ACCENT, zorder=2)
     # Labels alternate above and below so the two points 0.002 apart on the
     # x axis do not collide.
-    for i, (label, x, y) in enumerate(sorted(points, key=lambda t: t[1])):
-        dy = 11 if i % 2 == 0 else -15
+    # Placement is per label rather than alternating: the two A_generic
+    # points are 0.007 apart on x and 0.023 on y, so a rule that does not
+    # know which is which puts one on top of the other.
+    below = {"A_generic + relation + order", "A + relation"}
+    for label, x, y in points:
+        dy = -15 if label in below else 11
         ax.annotate(label, xy=(x, y), xytext=(0, dy), ha="center",
                     textcoords="offset points", fontsize=8.5)
     ax.set_xlabel("false positives on software others wrote (n = 1,034)")
@@ -357,6 +401,8 @@ def main():
     p.add_argument("--behaviour", default="~/work/features_behaviour.csv")
     p.add_argument("--names", default="~/work/hardneg_names.csv")
     p.add_argument("--shift-scores", default="/tmp/vsgrp_300.csv")
+    p.add_argument("--shift-pattern", default="/tmp/vsgrp_{cut}.csv",
+                   help="Per-sample score file for each cut, {cut} substituted")
     args = p.parse_args()
 
     outdir = os.path.expanduser(args.outdir)
@@ -365,7 +411,7 @@ def main():
 
     for fn in (lambda: fig_saturation(SATURATION, outdir),
                lambda: fig_volume_shift(args.shift_scores, args.modelling, outdir),
-               lambda: fig_cut_sweep(CUTS, outdir),
+               lambda: fig_cut_sweep(load_cuts(args.shift_pattern), outdir),
                lambda: fig_order_coverage(args.behaviour, args.modelling,
                                           args.names, outdir),
                lambda: fig_tradeoff(TRADE, outdir)):

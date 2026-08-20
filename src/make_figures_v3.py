@@ -383,8 +383,10 @@ def fig_tradeoff(points, outdir):
                     fontsize=8, color="white", weight="bold", zorder=3)
     key = "\n".join(f"{i}  {label}" for i, (label, _, _) in
                      enumerate(points, 1))
-    ax.annotate(key, xy=(0.52, 0.04), xycoords="axes fraction",
-                ha="left", va="bottom", fontsize=8.5, linespacing=1.5)
+    # Top left: every point sits on the diagonal from bottom-left to
+    # top-right, so that corner is the only region the key cannot cross.
+    ax.annotate(key, xy=(0.03, 0.97), xycoords="axes fraction",
+                ha="left", va="top", fontsize=8.5, linespacing=1.5)
 
     ax.set_xlabel("false positives on software others wrote (n = 1,034)")
     ax.set_ylabel("recall on ransomware that never encrypted (n = 722)")

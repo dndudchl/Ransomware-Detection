@@ -113,6 +113,13 @@ def read_csv(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--features-dir", default="../data/features")
+    parser.add_argument("--behaviour",
+                         help="features_behaviour.csv: behaviour presence and "
+                              "pairwise order, joined on sample_id the same "
+                              "way as the relational table. Order columns are "
+                              "blank where the pair never occurred, which the "
+                              "model reads as missing rather than as a third "
+                              "direction.")
     parser.add_argument("--relational", required=True)
     parser.add_argument("--out", default="../data/features/modelling.csv")
     parser.add_argument("--hardneg-names",
@@ -159,6 +166,8 @@ def main():
         print("[!] no ransomware features found"); return
 
     rel = {r["task_id"]: r for r in read_csv(args.relational)}
+    beh = ({r["task_id"]: r for r in read_csv(args.behaviour)}
+           if args.behaviour else {})
     # n_calls is kept: the feature tables record total_calls only for rows
     # that were extracted with dynamic coverage, and the volume group and the
     # executed-only filter both need a call count that is present for every
@@ -166,6 +175,10 @@ def main():
     rel_cols = [c for c in (next(iter(rel.values())).keys() if rel else [])
                 if c != "task_id"]
     print(f"relational features: {len(rel_cols)} columns for {len(rel)} runs")
+    beh_cols = [c for c in (next(iter(beh.values())).keys() if beh else [])
+                if c != "task_id"]
+    if beh_cols:
+        print(f"behaviour features: {len(beh_cols)} columns for {len(beh)} runs")
 
     rows = []
     for src, table in (("ransomware", ransom), ("benign", benign),
@@ -187,6 +200,23 @@ def main():
                 r[c] = extra.get(c, "")
     if missing_rel:
         print(f"[warn] {missing_rel} rows had no relational features")
+
+    # A run with no behaviour row gets blanks rather than zeros: "no sequence
+    # was extracted" is not the same as "the behaviour did not happen", and
+    # the order columns already use blank for a pair that never occurred.
+    if beh_cols:
+        missing_beh = 0
+        for r in rows:
+            extra = beh.get(r["sample_id"])
+            if extra is None:
+                missing_beh += 1
+                for c in beh_cols:
+                    r[c] = ""
+            else:
+                for c in beh_cols:
+                    r[c] = extra.get(c, "")
+        if missing_beh:
+            print(f"[warn] {missing_beh} rows had no behaviour features")
 
     # --- label ---
     kept, dropped_middle = [], 0

@@ -90,7 +90,7 @@ NON_FEATURES = {
     "source_dataset", "task_id", "_error",
 }
 
-GROUPS = {
+GROUPS_SPEC = {
     "static": [
         "total_imports", "indicative_category_count", "imp_crypto",
         "imp_file_unlock", "imp_network_spread", "imp_process_control",
@@ -101,17 +101,17 @@ GROUPS = {
     "volume": [
         "n_calls", "n_paths", "n_read", "n_write", "n_copy", "n_execute",
         "bytes_read", "bytes_written",
-        "n_file_writes", "n_registry_writes", "n_registry_deletes",
+        "n_registry_writes", "n_registry_deletes",
         "n_services_created", "n_services_started", "n_executed_commands",
         "active_windows", "other_windows", "write_only_nondestructive_windows",
-        "ext_variety_all", "api_distinct", "api_distinct_bigrams",
-        "cat_distinct_bigrams", "chain_distinct_shapes", "n_stages_all",
-        "n_stages_clean", "stage_timed_count", "stage_span_sec",
+        "ext_variety_all", "api_distinct", 
+        "chain_distinct_shapes", "n_stages_all",
+        "n_stages_clean", "stage_span_sec",
     ],
     "sequence": [
         "api_branching", "api_bigram_entropy", "api_top_bigram_share",
         "api_compress_ratio", "cat_switch_rate",
-        "fs_to_crypto", "crypto_to_fs", "fs_crypto_interleave",
+        "fs_to_crypto", "crypto_to_fs", 
         "n_crypto_calls", "crypto_buffer_entropy_mean",
         # How evenly spaced the file operations are. A loop encrypting a
         # thousand files keeps time, and the gaps between operations cluster
@@ -186,6 +186,13 @@ GROUPS = {
         "stage_ground_clearing", "stage_has_enumerate", "stage_has_wallpaper",
         "stage_has_persistence",
     ],
+    # Behaviour presence and pairwise order, from behaviour_sequence.py.
+    # These are listed by prefix rather than by name because the order
+    # columns are generated from whichever pairs occur in the data, and
+    # hard-coding 187 names here would go stale the moment the vocabulary
+    # or the corpus changes.
+    "behaviour": "PREFIX:has_",
+    "order": "PREFIX:ord_",
     "destruction": [
         "chain_read_destroy", "chain_write_destroy", "chain_full",
         "read_then_destroy", "write_then_destroy",
@@ -201,20 +208,66 @@ GROUPS = {
 # and the ransomware-specific indicators last but one -- if they help only
 # once everything else is present, they are not carrying the result.
 CUMULATIVE = [
+    # The transition matrix is left out: on the corrected negative set it
+    # moved the false positive rate from 0.030 to 0.074, and its 200 columns
+    # were beaten throughout by relation's 28. Behaviour and order come last
+    # so that the step from one to the other isolates what the *order* of
+    # two behaviours adds once their presence is already known.
     ("static", ["static"]),
     ("+ volume", ["static", "volume"]),
     ("+ sequence", ["static", "volume", "sequence"]),
     ("+ relation", ["static", "volume", "sequence", "relation"]),
-    ("+ transition", ["static", "volume", "sequence", "relation", "transition"]),
-    ("+ indicator", ["static", "volume", "sequence", "relation",
-                      "transition", "indicator"]),
+    ("+ indicator", ["static", "volume", "sequence", "relation", "indicator"]),
     ("+ destruction", ["static", "volume", "sequence", "relation",
-                        "transition", "indicator", "destruction"]),
+                       "indicator", "destruction"]),
+    ("+ behaviour", ["static", "volume", "sequence", "relation",
+                     "indicator", "destruction", "behaviour"]),
+    ("+ order", ["static", "volume", "sequence", "relation",
+                 "indicator", "destruction", "behaviour", "order"]),
 ]
 
+# ---------------------------------------------------------------- A / S axis
+#
+# The six groups above are organised by what a feature describes. The two
+# below cut the same columns a different way: does the feature depend on the
+# ORDER in which two events happened, or only on what happened and how much.
+#
+# This exists because the ablation over the six groups cannot answer the
+# research question. Roughly a third of the original columns already encode
+# order -- rw_latency_* is the delay between a read and a write on one file,
+# chain_* is the shape of one file's event sequence, the api bigram features
+# are adjacency in the call stream -- so adding an explicit order group to
+# them measures order against order and finds little. Separating the two
+# makes "individual" mean individual.
+#
+# Where a feature is arguable it is placed in INDIVIDUAL, which is the
+# conservative choice: it strengthens the baseline and understates what
+# sequence adds, so the comparison cannot flatter the hypothesis.
+SEQUENCE_COLS = [
+    # adjacency in the API stream
+    "api_branching", "api_bigram_entropy", "api_top_bigram_share",
+    "api_compress_ratio", "cat_switch_rate",
+    # one category of call following another
+    "fs_to_crypto", "crypto_to_fs",
+    # spacing between consecutive events
+    "gap_cv", "gap_median_ms", "gap_below_median", "burst_share",
+    # a read and a write on the same file, and how far apart
+    "rw_latency_median_ms", "rw_latency_cv", "rw_latency_under_100ms",
+    # the shape of one file's event sequence
+    "chain_read_only", "chain_write_only", "chain_read_write",
+    "chain_read_destroy", "chain_write_destroy", "chain_full",
+    "read_then_destroy", "write_then_destroy",
+    # the order in which directories were visited
+    "walk_same_dir_rate", "walk_dir_switches", "walk_revisit_rate",
+    "walk_run_length",
+    # a stage reached before another stage
+    "stage_ground_clearing",
+]
+
+
 # Also run each group on its own, which shows what it carries unaided.
-ALONE = ["static", "volume", "sequence", "relation", "transition",
-         "indicator", "destruction"]
+ALONE = ["static", "volume", "sequence", "relation", "indicator",
+         "destruction", "behaviour", "order"]
 
 
 def to_float(v):
@@ -308,6 +361,24 @@ def main():
                               "importance measures the same thing without that "
                               "problem, and without retraining.")
     parser.add_argument("--importance-out", default="/tmp/importance.csv")
+    parser.add_argument("--cv-rotation", type=int, default=0,
+                         help="Which rotation to run, 0 to K-1.")
+    parser.add_argument("--negative-cv", type=int, default=0,
+                         help="Rotate the negatives through K folds rather "
+                              "than holding one fixed fifth out. Under the "
+                              "simple split only a fifth of the negatives is "
+                              "ever measured, so a rate of 0.005 rests on one "
+                              "flagged program in about two hundred and "
+                              "cannot be told apart from 0.010. With K "
+                              "rotations every negative is measured once, by "
+                              "a model that did not train on it, and the "
+                              "denominator becomes the whole set.")
+    parser.add_argument("--pos-out",
+                         help="Per-positive detection, one column per feature "
+                              "group. Lets the recall be read separately for "
+                              "runs that reached encryption and runs that did "
+                              "not, which is the check on whether the model "
+                              "learnt the malware or only the encryption.")
     parser.add_argument("--hard-out-groups",
                          help="Per-variant flag rate under every feature set, "
                               "one column per group. The single-model file "
@@ -335,6 +406,122 @@ def main():
         print(f"executed only: kept {len(rows)} of {before}")
 
     all_cols = list(rows[0].keys())
+    def expand_group(spec, columns):
+        """
+        A group is either an explicit list of column names or a prefix.
+
+        The behaviour and order groups are generated: which order columns
+        exist depends on which behaviour pairs occur in the corpus, so
+        naming them here would go stale. Everything else stays an explicit
+        list, because a prefix would silently absorb any new column that
+        happened to start with the same letters.
+        """
+        if isinstance(spec, str) and spec.startswith("PREFIX:"):
+            pre = spec[len("PREFIX:"):]
+            return sorted(c for c in columns if c.startswith(pre))
+        return list(spec)
+
+    GROUPS = {g: expand_group(spec, all_cols)
+              for g, spec in GROUPS_SPEC.items()}
+
+    # The A/S axis is derived from the six groups rather than listed twice,
+    # so a column can never be in one axis and missing from the other.
+    _named = [c for g, cols in GROUPS.items() if g != "transition"
+              for c in cols]
+    seq_cols = [c for c in _named
+                if c in SEQUENCE_COLS or c.startswith("ord_")]
+    ind_cols = [c for c in _named if c not in set(seq_cols)]
+    GROUPS["sequence_axis"] = seq_cols
+    GROUPS["individual_axis"] = ind_cols
+
+    # Order is not one thing. The same run can be described as a sequence of
+    # API calls, of events on one file, or of behaviours, and the three are
+    # different claims. The 200-column API transition matrix failed and the
+    # behaviour pairs did not, which is a fact about the level of
+    # abstraction rather than about order as such -- so the levels are
+    # measured separately rather than pooled into one "sequence" group.
+    ORDER_API = ["api_branching", "api_bigram_entropy", "api_top_bigram_share",
+                 "api_compress_ratio", "cat_switch_rate", "fs_to_crypto",
+                 "crypto_to_fs", "gap_cv", "gap_median_ms",
+                 "gap_below_median", "burst_share"]
+    ORDER_FILE = ["rw_latency_median_ms", "rw_latency_cv",
+                  "rw_latency_under_100ms", "chain_read_only",
+                  "chain_write_only", "chain_read_write", "chain_read_destroy",
+                  "chain_write_destroy", "chain_full", "read_then_destroy",
+                  "write_then_destroy", "walk_same_dir_rate",
+                  "walk_dir_switches", "walk_revisit_rate", "walk_run_length",
+                  "stage_ground_clearing"]
+    # A_reduced: the individual features with the aggregate ratios and the
+    # read-write set relations removed. Those are where an aggregate quietly
+    # encodes a sequence -- n_read_write_pairs says a file was both read and
+    # written, byte_io_ratio says how much came back out against what went
+    # in -- so leaving them in means the baseline already contains what the
+    # sequence group is meant to add.
+    A_REDUCED_EXCLUDE = [
+        "rw_jaccard", "write_not_read", "read_not_write", "n_read_write_pairs",
+        "rw_size_ratio", "byte_io_ratio", "mean_read_size", "mean_write_size",
+        "write_size_uniformity", "chain_top_shape_share", "ext_top_share",
+        "sel_rate_document", "sel_rate_media", "sel_rate_executable",
+        "sel_rate_spread", "sel_system_touch_share", "sel_system_spared",
+        "sel_destroyed_doc_share", "sel_destroyed_exe_share",
+        "sel_doc_minus_exe", "move_to_write_ratio", "delete_to_write_ratio",
+        "crypto_buffer_entropy_mean",
+    ]
+    GROUPS["a_reduced"] = [c for c in ind_cols if c not in A_REDUCED_EXCLUDE]
+
+    # The individual features split by what kind of quantity they are, which
+    # is a different cut from the six descriptive groups: relation there
+    # mixes set overlap with read-to-write latency, and this separates them.
+    A_RELATION = ["rw_jaccard", "write_not_read", "read_not_write",
+                  "n_read_write_pairs"]
+    A_AGGREGATE = [c for c in A_REDUCED_EXCLUDE if c not in A_RELATION]
+    A_STATIC = ["total_imports", "indicative_category_count", "imp_crypto",
+                "imp_file_unlock", "imp_network_spread", "imp_anti_analysis",
+                "crypto_imported_not_called", "crypto_called_not_imported",
+                "static_dynamic_agreement"]
+    A_PRESENCE = [c for c in ind_cols
+                  if c.startswith("has_") or c.startswith("stage_has_")]
+    _assigned = set(A_RELATION + A_AGGREGATE + A_STATIC + A_PRESENCE)
+    # Experiment 1: A is the twenty behaviour-presence columns alone, which
+    # are the MITRE-derived ransomware behaviours. S1 is the relation group,
+    # S2 the pairwise order. A narrow A avoids the situation where one strong
+    # column in a wide baseline decides everything.
+    GROUPS["a_behaviour"] = [c for c in _named if c.startswith("has_")]
+    GROUPS["s1_relation"] = [c for c in GROUPS.get("relation", [])]
+    GROUPS["s2_order"] = [c for c in _named if c.startswith("ord_")]
+
+    # Experiment 2: a baseline with the ransomware-specific columns removed.
+    #
+    # Selection is by documented design intent, not by measured overlap
+    # between the classes. Choosing columns because ransomware and benign
+    # look alike on them would be choosing on the label, and would bias the
+    # baseline downwards by construction; excluding columns that exist
+    # *because* someone knew what ransomware does is a statement about where
+    # the feature came from, which the label plays no part in.
+    A_GENERIC_EXCLUDE = set(
+        [c for c in _named if c.startswith("imp_")] +
+        ["total_imports", "indicative_category_count",
+         "crypto_imported_not_called", "crypto_called_not_imported",
+         "static_dynamic_agreement",
+         "n_shadow_delete", "n_recovery_disable", "n_service_stop",
+         "n_process_kill", "n_log_clear", "n_prep_categories",
+         "stage_ground_clearing", "stage_has_enumerate",
+         "stage_has_wallpaper", "stage_has_persistence",
+         "has_shadow_delete", "has_recovery_disable", "has_backup_delete",
+         "has_firewall_disable", "has_eventlog_clear", "has_ransom_note",
+         "has_wallpaper_set", "has_crypto_api", "has_self_copy",
+         "sel_destroyed_doc_share", "sel_destroyed_exe_share",
+         "sel_doc_minus_exe", "n_crypto_calls",
+         "crypto_buffer_entropy_mean"])
+    GROUPS["a_generic"] = [c for c in ind_cols if c not in A_GENERIC_EXCLUDE]
+    GROUPS["a_relation"] = [c for c in ind_cols if c in A_RELATION]
+    GROUPS["a_aggregate"] = [c for c in ind_cols if c in A_AGGREGATE]
+    GROUPS["a_static"] = [c for c in ind_cols if c in A_STATIC]
+    GROUPS["a_presence"] = [c for c in ind_cols if c in A_PRESENCE]
+    GROUPS["a_count"] = [c for c in ind_cols if c not in _assigned]
+    GROUPS["order_api"] = [c for c in _named if c in ORDER_API]
+    GROUPS["order_file"] = [c for c in _named if c in ORDER_FILE]
+    GROUPS["order_behaviour"] = [c for c in _named if c.startswith("ord_")]
     grouped = {c for cols in GROUPS.values() for c in cols}
     known = grouped | CIRCULAR | NON_FEATURES
     unassigned = [c for c in all_cols if c not in known]
@@ -390,8 +577,23 @@ def main():
     hard_train = [i for i in hard_all if rows[i].get("split") == "train"]
     hard_idx = [i for i in hard_all if i not in set(hard_train)]
 
+    if args.negative_cv > 1:
+        # Every negative takes a turn in the held-out part. Rotation r holds
+        # out the negatives whose position in a fixed shuffle is congruent to
+        # r modulo K and trains on the rest; the caller loops over r and
+        # pools the results, so each negative is scored exactly once by a
+        # model that never saw it.
+        K, r = args.negative_cv, args.cv_rotation
+        neg_all = sorted(set(benign_idx) | set(hard_all))
+        order = np.random.default_rng(args.seed).permutation(len(neg_all))
+        for pos, i in enumerate(neg_all):
+            rows[i]["split"] = "holdout" if order[pos] % K == r else "train"
+        hard_train = [i for i in hard_all if rows[i]["split"] == "train"]
+        hard_idx = [i for i in hard_all if rows[i]["split"] == "holdout"]
+        print(f"negative CV: rotation {r} of {K}")
+
     if simple:
-        # One negative class. The benign runs that executed and the hard
+        # One negative class."" The benign runs that executed and the hard
         # negatives are the same thing for this purpose -- software that ran
         # and did something -- so they are trained on and measured together,
         # and the two false positive columns become one number reported
@@ -603,6 +805,14 @@ def main():
         X = FULL[:, [col_index[c] for c in feature_cols]]
         per_fold = []
         hard_flagged = np.zeros(len(hard_idx))
+        # Which positives were caught, kept per sample rather than as a rate.
+        # A model trained on runs that reached encryption may be recognising
+        # the encryption rather than the ransomware, and the runs that
+        # executed without reaching it are the only way to tell: same
+        # malware, minus the one behaviour the label was defined by. Indexed
+        # by row so it can be joined back to the verdict afterwards.
+        pos_flagged = np.zeros(len(rows))
+        pos_folds = np.zeros(len(rows))
         hard_scores = []
 
         for k, fam in enumerate(fold_families):
@@ -656,6 +866,9 @@ def main():
             pr = model.predict_proba(X[ran])[:, 1] if ran else np.array([])
 
             hard_flagged += (ph >= args.threshold).astype(float)
+            for pos_i, i in enumerate(test_pos):
+                pos_flagged[i] += float(pt[pos_i] >= args.threshold)
+                pos_folds[i] += 1
             hard_scores.append(ph)
             per_fold.append({
                 "family": fam, "n_pos": len(test_pos), "auc": a,
@@ -674,6 +887,7 @@ def main():
         return {
             "group": tag, "n_features": len(feature_cols),
             "hard_flagged": hard_flagged, "hard_mean_score": mean_score,
+            "pos_flagged": pos_flagged, "pos_folds": pos_folds,
             "n_folds": len(per_fold),
             "auc": avg("auc"), "tpr": avg("tpr"),
             "fpr_benign": avg("fpr_benign"),
@@ -830,6 +1044,47 @@ def main():
               f"{r['fpr_benign']:>11.3f}{r['fpr_benign_ran']:>9.3f}"
               f"{r['fpr_hard']:>9.3f}")
 
+    # A / S / A+S: the comparison the research question actually asks for.
+    print()
+    for tag, groups in (("individual (A)", ["individual_axis"]),
+                        ("sequence (S)", ["sequence_axis"]),
+                        ("A + S", ["individual_axis", "sequence_axis"]),
+                        ("order: api", ["order_api"]),
+                        ("order: file", ["order_file"]),
+                        ("order: behav", ["order_behaviour"]),
+                        ("A + ord api", ["individual_axis", "order_api"]),
+                        ("A + ord file", ["individual_axis", "order_file"]),
+                        ("A + ord behav", ["individual_axis", "order_behaviour"]),
+                        ("A_reduced", ["a_reduced"]),
+                        ("A_red + S", ["a_reduced", "sequence_axis"]),
+                        ("A_red + ordbeh", ["a_reduced", "order_behaviour"]),
+                        ("a: static", ["a_static"]),
+                        ("a: count", ["a_count"]),
+                        ("a: presence", ["a_presence"]),
+                        ("a: aggregate", ["a_aggregate"]),
+                        ("a: relation", ["a_relation"]),
+                        ("count+relation", ["a_count", "a_relation"]),
+                        ("count+aggregate", ["a_count", "a_aggregate"]),
+                        ("--- exp 1 ---", ["a_behaviour"]),
+                        ("A(behav)", ["a_behaviour"]),
+                        ("S1(relation)", ["s1_relation"]),
+                        ("S2(order)", ["s2_order"]),
+                        ("S1+S2", ["s1_relation", "s2_order"]),
+                        ("A+S1", ["a_behaviour", "s1_relation"]),
+                        ("A+S2", ["a_behaviour", "s2_order"]),
+                        ("A+S1+S2", ["a_behaviour", "s1_relation", "s2_order"]),
+                        ("--- exp 2 ---", ["a_generic"]),
+                        ("A_gen", ["a_generic"]),
+                        ("A_gen+S1", ["a_generic", "s1_relation"]),
+                        ("A_gen+S2", ["a_generic", "s2_order"]),
+                        ("A_gen+S1+S2", ["a_generic", "s1_relation", "s2_order"])):
+        cols = [c for g in groups for c in present[g]]
+        r = evaluate(cols, tag)
+        results.append(r)
+        print(f"{tag:<16}{r['n_features']:>5}{r['auc']:>8.3f}{r['tpr']:>8.3f}"
+              f"{r['fpr_benign']:>11.3f}{r['fpr_benign_ran']:>9.3f}"
+              f"{r['fpr_hard']:>9.3f}")
+
     with open(args.out, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["group", "n_features", "auc", "tpr",
@@ -869,6 +1124,23 @@ def main():
                            [f"{r['hard_flagged'][pos] / max(1, r['n_folds']):.4f}"
                             for r in results])
         print(f"[saved] {args.hard_out_groups}")
+
+    if args.pos_out:
+        cols = [r for r in results]
+        pos_rows = [i for i in range(len(rows)) if y[i] == 1]
+        with open(args.pos_out, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["sample_id", "verdict", "n_folds"] +
+                       [r["group"] for r in cols])
+            for i in pos_rows:
+                nf = cols[0]["pos_folds"][i] if cols else 0
+                if nf == 0:
+                    continue
+                w.writerow([rows[i]["sample_id"], rows[i].get("verdict", ""),
+                            int(nf)] +
+                           [f"{r['pos_flagged'][i] / max(1, r['pos_folds'][i]):.4f}"
+                            for r in cols])
+        print(f"[saved] {args.pos_out}")
 
     if args.importance:
         all_cols = [c for g in GROUPS for c in present[g]]
